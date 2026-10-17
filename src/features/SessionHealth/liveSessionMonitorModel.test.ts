@@ -8,6 +8,8 @@ import {
   deriveLiveSessionSummary,
   monitorPhase,
 } from "./liveSessionMonitorModel";
+import { ingestNativePhase, ingestNativeProgress } from "./nativePhaseEvents";
+import { PROVIDER_FIRST_OUTPUT_ADVISORY_MS } from "./progressAssessment";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 
@@ -244,5 +246,138 @@ describe("live session monitor presentation model", () => {
     );
     expect(JSON.stringify(s)).not.toContain("VERY SECRET USER INPUT");
     expect(JSON.stringify(s)).not.toContain("SECRET provider token");
+  });
+
+  it("shows the actual Rust provider boundary only for an observed native session", () => {
+    const phases = ingestNativePhase(
+      new Map(),
+      {
+        sessionId: "native-1",
+        turnId: "turn-1",
+        phase: "provider_request",
+      },
+      NOW
+    );
+    const summary = deriveLiveSessionSummary(
+      [session("native-1", "running"), session("native-2", "running")],
+      new Map(),
+      { nowMs: NOW, nativePhases: phases }
+    );
+    expect(summary.rows.find((r) => r.id === "native-1")?.detail).toContain(
+      "provider request"
+    );
+    expect(summary.rows.find((r) => r.id === "native-1")?.source).toBe(
+      "native-phase"
+    );
+    expect(summary.rows.find((r) => r.id === "native-2")?.detail).toContain(
+      "step unknown"
+    );
+  });
+
+  it("does not display a native running phase against a terminal session", () => {
+    const phases = ingestNativePhase(
+      new Map(),
+      {
+        sessionId: "native",
+        turnId: "turn-1",
+        phase: "tool_executing",
+        tool: "read_file",
+      },
+      NOW
+    );
+    const summary = deriveLiveSessionSummary(
+      [session("native", "completed")],
+      new Map(),
+      { nowMs: NOW, nativePhases: phases, activeOnly: false }
+    );
+    expect(summary.rows[0]?.source).toBe("session-roster");
+    expect(summary.rows[0]?.detail).toContain("step unknown");
+  });
+
+  it("prioritizes authoritative CLI hook details over unrelated native phase", () => {
+    const phases = ingestNativePhase(
+      new Map(),
+      {
+        sessionId: "cli",
+        turnId: "turn-1",
+        phase: "tool_executing",
+        tool: "Read",
+      },
+      NOW
+    );
+    const h = hook("cli", "waiting_for_user", {
+      interactivePrompt: "SECRET PROMPT",
+    });
+    const summary = deriveLiveSessionSummary(
+      [session("cli", "running")],
+      new Map([["cli", h]]),
+      { nowMs: NOW, nativePhases: phases }
+    );
+    expect(summary.rows[0]?.source).toBe("cli-hook");
+    expect(summary.rows[0]?.detail).toContain("waiting for user");
+    expect(JSON.stringify(summary)).not.toContain("SECRET");
+  });
+
+  it("shows a quiet native provider advisory without overriding persisted status", () => {
+    let phases = ingestNativePhase(
+      new Map(),
+      {
+        sessionId: "native-1",
+        turnId: "turn-1",
+        phase: "provider_request",
+      },
+      NOW
+    );
+    const summaries = deriveLiveSessionSummary(
+      [session("native-1", "running", "2026-10-17T11:59:30Z")],
+      new Map(),
+      { nowMs: NOW + PROVIDER_FIRST_OUTPUT_ADVISORY_MS, nativePhases: phases }
+    );
+    expect(summaries.busy).toBe(1);
+    expect(summaries.quietSignals).toBe(1);
+    expect(summaries.rows[0]?.status).toBe("running");
+    expect(summaries.rows[0]?.quietWarning).toContain("90");
+
+    phases = ingestNativeProgress(
+      phases,
+      {
+        sessionId: "native-1",
+        turnId: "turn-1",
+        kind: "response_delta",
+      },
+      NOW + PROVIDER_FIRST_OUTPUT_ADVISORY_MS
+    );
+    const progressed = deriveLiveSessionSummary(
+      [session("native-1", "running", "2026-10-17T11:59:30Z")],
+      new Map(),
+      {
+        nowMs: NOW + PROVIDER_FIRST_OUTPUT_ADVISORY_MS + 1000,
+        nativePhases: phases,
+      }
+    );
+    expect(progressed.quietSignals).toBe(0);
+    expect(progressed.rows[0]?.quietWarning).toBeNull();
+  });
+
+  it("does not warn for waiting user or terminal sessions", () => {
+    const phases = ingestNativePhase(
+      new Map(),
+      {
+        sessionId: "waiting",
+        turnId: "turn-1",
+        phase: "provider_request",
+      },
+      NOW
+    );
+    const summary = deriveLiveSessionSummary(
+      [session("waiting", "waiting_for_user")],
+      new Map(),
+      {
+        nowMs: NOW + PROVIDER_FIRST_OUTPUT_ADVISORY_MS * 3,
+        nativePhases: phases,
+      }
+    );
+    expect(summary.quietSignals).toBe(0);
+    expect(summary.rows[0]?.quietWarning).toBeNull();
   });
 });

@@ -5,6 +5,12 @@
 import type { AgentLiveStatus } from "@src/api/tauri/rpc/schemas/agentOrgs";
 import type { Session } from "@src/store/session/sessionAtom/types";
 
+import {
+  type NativePhaseMap,
+  nativePhaseDescription,
+} from "./nativePhaseEvents";
+import { assessNativeProgress } from "./progressAssessment";
+
 const BUSY_STATUSES = new Set([
   "running",
   "in_progress",
@@ -42,10 +48,12 @@ export interface LiveSessionRow {
   phase: MonitorPhase;
   /** Provider/tool phase is unknown for native Rust rows without a hook. */
   detail: string;
-  source: "cli-hook" | "session-roster";
+  source: "cli-hook" | "native-phase" | "session-roster";
   /** Only means the persisted row has not updated recently; NOT a hang. */
   oldPersistedStatus: boolean;
   updatedAtMs: number | null;
+  /** Warning only: no proof of a stalled provider or tool. */
+  quietWarning: string | null;
 }
 
 export interface LiveSessionSummary {
@@ -55,6 +63,7 @@ export interface LiveSessionSummary {
   busy: number;
   attention: number;
   olderStatus: number;
+  quietSignals: number;
   truncated: boolean;
 }
 
@@ -80,6 +89,7 @@ export function deriveLiveSessionSummary(
     activeOnly?: boolean;
     nowMs?: number;
     maxRows?: number;
+    nativePhases?: NativePhaseMap;
   } = {}
 ): LiveSessionSummary {
   const nowMs = options.nowMs ?? Date.now();
@@ -91,6 +101,7 @@ export function deriveLiveSessionSummary(
   let busy = 0;
   let attention = 0;
   let olderStatus = 0;
+  let quietSignals = 0;
   const rows: LiveSessionRow[] = [];
 
   // The app-wide session roster is already paginated. Do not trigger a
@@ -116,13 +127,25 @@ export function deriveLiveSessionSummary(
 
     const tool =
       hook?.status === "running" ? safeToolName(hook.toolName) : null;
-    const detail = hook
-      ? hook.status === "waiting_for_user"
-        ? "CLI hook: waiting for user"
-        : tool
-          ? "CLI tool: " + tool
-          : "CLI hook status · step unspecified"
-      : "Persisted Rust/session status · provider/tool step unknown";
+    // The status remains Rust/CLI-owned. Only the visible detail is enhanced
+    // with the last observed content-free native execution transition.
+    const native = hook
+      ? undefined
+      : options.nativePhases?.get(session.session_id);
+    const observedNative = phase === "working" ? native : undefined;
+    const assessment = assessNativeProgress(observedNative, nowMs);
+    const quietWarning =
+      assessment.level === "quiet" ? assessment.warning : null;
+    if (quietWarning) quietSignals++;
+    const detail = observedNative
+      ? nativePhaseDescription(observedNative.phase, observedNative.tool)
+      : hook
+        ? hook.status === "waiting_for_user"
+          ? "CLI hook: waiting for user"
+          : tool
+            ? "CLI tool: " + tool
+            : "CLI hook status · step unspecified"
+        : "Persisted Rust/session status · provider/tool step unknown";
 
     rows.push({
       id: session.session_id,
@@ -135,9 +158,14 @@ export function deriveLiveSessionSummary(
       status,
       phase,
       detail,
-      source: hook ? "cli-hook" : "session-roster",
+      source: hook
+        ? "cli-hook"
+        : observedNative
+          ? "native-phase"
+          : "session-roster",
       oldPersistedStatus,
       updatedAtMs,
+      quietWarning,
     });
   }
 
@@ -162,6 +190,7 @@ export function deriveLiveSessionSummary(
     busy,
     attention,
     olderStatus,
+    quietSignals,
     truncated: totalLoaded > limit,
   };
 }

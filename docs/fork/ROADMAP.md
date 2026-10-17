@@ -33,7 +33,7 @@
 - [ ] Add session crash/restart, cancel/resume, provider-retry-after-tool and background-process teardown fault injection.
 - [x] Catch scheduler execute-factory panics, track dead worker handles, recover the queue on next enqueue, and persist failed session state; added targeted regression tests (final CI pending).
 - [x] Continue independent startup reconciliation phases after a partial failure so stale in-flight session cleanup is still attempted; see [multi-session recovery audit](SESSION_STALL_RECOVERY.md).
-- [ ] Implement bounded progress/heartbeat diagnostics for genuinely hung provider or Tool futures, with cancellation semantics that never replay side-effectful work.
+- [ ] Implement bounded progress/heartbeat diagnostics for genuinely hung provider or Tool futures, with cancellation semantics that never replay side-effectful work. **Partial source implementation:** observation-only 3-minute warning with 5-minute reminders and virtual-time tests lives on [the isolated watchdog branch](https://github.com/TheerasakPing/ORG2/tree/feature/tp-session-watchdog-observability); it does **not** prove lack of progress or automatically cancel work. See [watchdog specification](SESSION_WATCHDOG_OBSERVABILITY.md).
 - [ ] Stress-test 1/5/20/50 concurrent sessions under load and validate clean shutdown/restart on all three platforms.
 
 **Acceptance:** no double-owned memory consolidation; session/tool cancellation leaves no orphaned jobs; migration failures cannot leave an app silently running on a partially upgraded schema.

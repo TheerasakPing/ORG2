@@ -10,12 +10,17 @@
 //! files), NOT the L3 learnings consolidation engine in
 //! `super::super::consolidation`. The two subsystems are unrelated.
 
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use std::time::SystemTime;
 use tracing::warn;
 
 const LOCK_FILE: &str = ".consolidate-lock";
+// A distinct, permanent inode used for atomic OS-level advisory locking.
+// Never unlink this while any process may hold it: unlinking permits another
+// process to open a different inode and incorrectly become an owner.
+const LEASE_FILE: &str = ".consolidate-lease";
 
 /// Stale threshold: even if the PID is live, reclaim after this duration.
 const HOLDER_STALE_MS: u64 = 60 * 60 * 1000; // 1 hour
@@ -61,6 +66,8 @@ pub struct ConsolidationLease {
     workspace: PathBuf,
     prior_mtime_ms: u64,
     committed: bool,
+    // fs2/FileExt OS lock: held until after Drop has committed/rolled back.
+    _lock_file: File,
 }
 
 impl ConsolidationLease {
@@ -79,13 +86,29 @@ impl Drop for ConsolidationLease {
 
 /// Try to acquire the consolidation lock as an RAII lease.
 pub fn try_acquire_lease(workspace: &Path) -> Result<Option<ConsolidationLease>, String> {
-    try_acquire(workspace).map(|prior| {
-        prior.map(|prior_mtime_ms| ConsolidationLease {
-            workspace: workspace.to_path_buf(),
-            prior_mtime_ms,
-            committed: false,
-        })
-    })
+    let memory = super::memory_dir(workspace);
+    fs::create_dir_all(&memory).map_err(|err| format!("mkdir failed: {err}"))?;
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(memory.join(LEASE_FILE))
+        .map_err(|err| format!("open consolidation lease: {err}"))?;
+    match fs2::FileExt::try_lock_exclusive(&lock_file) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => return Ok(None),
+        Err(err) => return Err(format!("acquire consolidation lease: {err}")),
+    }
+    // The legacy timestamp/PID protocol is read and updated ONLY after the
+    // exclusive OS lock is held, so threads sharing a PID cannot both win.
+    let acquired = try_acquire(workspace)?;
+    Ok(acquired.map(|prior_mtime_ms| ConsolidationLease {
+        workspace: workspace.to_path_buf(),
+        prior_mtime_ms,
+        committed: false,
+        _lock_file: lock_file,
+    }))
 }
 
 /// Try to acquire the consolidation lock.
@@ -93,8 +116,9 @@ pub fn try_acquire_lease(workspace: &Path) -> Result<Option<ConsolidationLease>,
 /// Returns `Ok(prior_mtime_ms)` on success, `Ok(None)` if blocked by
 /// another process, `Err` on I/O failure.
 ///
-/// The lock is "acquired" by writing our PID and verifying we won.
-pub fn try_acquire(workspace: &Path) -> Result<Option<u64>, String> {
+/// The PID/timestamp step is only valid while the RAII lease holds the OS
+/// lock on the stable `.consolidate-lease` inode. Never call it alone.
+fn try_acquire(workspace: &Path) -> Result<Option<u64>, String> {
     let path = lock_path(workspace);
     let mem_dir = super::memory_dir(workspace);
 
@@ -261,39 +285,16 @@ fn is_process_running(pid: u32) -> bool {
     }
 }
 
-/// Set file mtime (cross-platform).
+/// Restore the previous consolidation mtime on macOS, Windows and Linux.
+/// `FileTimes` avoids the earlier Unix-only utimensat implementation.
 fn set_file_mtime(path: &Path, mtime_ms: u64) -> Result<(), String> {
-    let secs = (mtime_ms / 1000) as i64;
-
-    #[cfg(unix)]
-    {
-        use std::ffi::CString;
-        let path_cstr = CString::new(path.to_string_lossy().as_bytes())
-            .map_err(|e| format!("CString: {}", e))?;
-        let times = [
-            libc::timespec {
-                tv_sec: secs,
-                tv_nsec: ((mtime_ms % 1000) * 1_000_000) as _,
-            },
-            libc::timespec {
-                tv_sec: secs,
-                tv_nsec: ((mtime_ms % 1000) * 1_000_000) as _,
-            },
-        ];
-        let ret = unsafe { libc::utimensat(libc::AT_FDCWD, path_cstr.as_ptr(), times.as_ptr(), 0) };
-        if ret != 0 {
-            return Err(format!(
-                "utimensat failed: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        Ok(())
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (path, secs);
-        Err("set_file_mtime not implemented on this platform".to_string())
-    }
+    let timestamp = SystemTime::UNIX_EPOCH + Duration::from_millis(mtime_ms);
+    let file = OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map_err(|err| format!("open mtime target: {err}"))?;
+    file.set_times(fs::FileTimes::new().set_modified(timestamp))
+        .map_err(|err| format!("set mtime: {err}"))
 }
 
 #[cfg(test)]
@@ -380,6 +381,55 @@ mod tests {
             .expect("lease available");
         lease.commit();
         assert!(read_last_consolidated_at(tmp.path()) > 0);
+    }
+
+    #[test]
+    fn lease_blocks_another_thread_in_same_process() {
+        let tmp = TempDir::new().unwrap();
+        let first = try_acquire_lease(tmp.path()).unwrap().unwrap();
+        assert!(try_acquire_lease(tmp.path()).unwrap().is_none());
+        drop(first);
+        assert!(try_acquire_lease(tmp.path()).unwrap().is_some());
+    }
+
+    #[test]
+    fn simultaneous_acquirers_have_exactly_one_owner() {
+        use std::sync::{Arc, Barrier};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().to_owned();
+        let start = Arc::new(Barrier::new(9));
+        let hold = Arc::new(Barrier::new(9));
+        let acquired = Arc::new(AtomicUsize::new(0));
+        let mut threads = Vec::new();
+        for _ in 0..8 {
+            let (p, s, h, count) = (path.clone(), start.clone(), hold.clone(), acquired.clone());
+            threads.push(std::thread::spawn(move || {
+                s.wait();
+                let lease = try_acquire_lease(&p).expect("OS lock");
+                if lease.is_some() {
+                    count.fetch_add(1, Ordering::SeqCst);
+                }
+                h.wait(); // Keep the winner alive until every contender checked.
+                drop(lease);
+            }));
+        }
+        start.wait();
+        hold.wait();
+        for thread in threads { thread.join().unwrap(); }
+        assert_eq!(acquired.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn rollback_restores_previous_timestamp_across_platforms() {
+        let tmp = TempDir::new().unwrap();
+        record_consolidation(tmp.path()).unwrap();
+        let prior = read_last_consolidated_at(tmp.path());
+        let lease = try_acquire_lease(tmp.path()).unwrap().unwrap();
+        drop(lease);
+        let restored = read_last_consolidated_at(tmp.path());
+        assert_eq!(restored, prior);
     }
 
     #[test]

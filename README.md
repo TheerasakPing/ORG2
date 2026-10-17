@@ -47,7 +47,7 @@ It is not just another AI coding tool; it is an experiment in human/agent organi
 
 ## TP Agent Studio fork status / สถานะการพัฒนา
 
-**ภาษาไทย:** TP Agent Studio เป็น Fork อิสระของ ORG2 ซึ่งได้รวมความสามารถหลักจาก [PR #23](https://github.com/TheerasakPing/ORG2/pull/23) เข้าสู่สาขา `develop` แล้ว ประกอบด้วยอัตลักษณ์แอปและไอคอน Two-tone, ระบบ Rust Agent Harness (`DialogScheduler`), Live Session Monitor, Worker Overview, การแก้ไขปัญหา SQLite Lock Contention / Auto-Dream Lease Lock และการสร้างไฟล์ติดตั้งแบบ Preview (Unsigned `ORGII_BUILD_KIND=local`) สำหรับ macOS Apple Silicon (M4 `aarch64-apple-darwin`), Windows 11 x64 และ Linux x64 ทั้งนี้ **ยังไม่มีการเผยแพร่ไฟล์ติดตั้งที่ลงนามรับรอง (Signed Production Installer)** และ **ยังไม่ควรใช้งานร่วมกับบัญชี Cloud จริงหรือข้อมูลสำคัญ** จนกว่าการแยกบริการ OAuth/Cloud และการลงนามโค้ดอิสระจะเสร็จสมบูรณ์
+**ภาษาไทย:** TP Agent Studio เป็น Fork อิสระของ ORG2 ซึ่งได้รวมความสามารถหลักจาก [PR #23](https://github.com/TheerasakPing/ORG2/pull/23) เข้าสู่สาขา `develop` แล้ว ประกอบด้วยอัตลักษณ์แอปและไอคอน Two-tone, ระบบ Rust Agent Harness (`DialogScheduler`), Live Session Monitor, Worker Overview, การแก้ไขปัญหา SQLite Lock Contention / Auto-Dream Lease Lock และการสร้างไฟล์ติดตั้งแบบ Preview (Unsigned) สำหรับ macOS Apple Silicon (M4 `aarch64-apple-darwin`), Windows 11 x64 และ Linux x64 ทั้งนี้ **ยังไม่มีการเผยแพร่ไฟล์ติดตั้งที่ลงนามรับรอง (Signed Production Installer)** และ **ยังไม่ควรใช้งานร่วมกับบัญชี Cloud จริงหรือข้อมูลสำคัญ** จนกว่าการแยกบริการ OAuth/Cloud และการลงนามโค้ดอิสระจะเสร็จสมบูรณ์
 
 ### Live Session Monitor, Worker Architecture & Recovery Behavior
 
@@ -76,7 +76,7 @@ To avoid ambiguity, TP Agent Studio tracks five distinct engineering states:
 | ----------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Implemented**   | Source code and configuration exist in the repository                                                 | Fork identity (`com.theerasakping.tpagentstudio`), isolated runtime profile (`~/.tp-agent-studio`), disabled updater (`FORK_UPDATER_READY=false`), `DialogScheduler` recovery, Auto-Dream OS file lease, Live Session Monitor, and Worker Overview                                                         |
 | **Tested**        | Automated unit/integration tests pass with recorded evidence                                          | Frontend typecheck/ESLint/Vitest (52/52 SessionHealth, 57/57 dev scripts, 10/10 tauri wrapper tests), fork safety/identity/icon guards, and Rust scheduler/recovery/lock tests (including synthetic 1/5/20/50-session offline concurrency tests; **does not** prove 50 concurrent live LLM provider calls) |
-| **Built**         | Compiled native binary and packaged `.app` / `.dmg` / `.exe` / `.deb` artifacts produced              | macOS Apple Silicon (`aarch64-apple-darwin`) `.app` and `.dmg` built locally (`ORGII_BUILD_KIND=local`, ad-hoc signed `-`); Linux x64 and Windows x64 preview installers built in GitHub Actions run `39045826243`                                                                                         |
+| **Built**         | Compiled native binary and packaged `.app` / `.dmg` / `.exe` / `.deb` artifacts produced              | macOS Apple Silicon (`aarch64-apple-darwin`) `.app` and `.dmg` built locally (local build mode, ad-hoc signed `-`); Linux x64 and Windows x64 preview installers built in GitHub Actions run `39045826243`                                                                                                 |
 | **Installed**     | Artifact mounted/copied and launched on target OS hardware with verified profile isolation            | Verified on Apple Silicon Mac M4 (`arm64`): `TP Agent Studio.app` launches, renders UI, stages `org2-pm` sidecar, keeps updater disabled, and isolates runtime state from `~/.orgii`                                                                                                                       |
 | **Release-ready** | Independently signed, notarized, Cloud/OAuth-isolated, and certified for public end-user distribution | **Not yet Release-ready** — blocked on Apple Developer ID signing/notarization, Windows Authenticode signing, fork-owned Cloud/OAuth backend (`docs/fork/FORK_CLOUD_BOUNDARY.md`), and real-provider 50-session stress certification                                                                       |
 
@@ -241,19 +241,19 @@ Use ORG2's built-in Rust harness or launch these supported coding-agent CLIs fro
 
 ## Release availability
 
-Current source version: v2.0.8 (2026-10-17 fork integration on `develop`)
+Current source version: v2.0.8 (2026-09-23)
 
-**No independently signed TP Agent Studio installers are available yet.** This fork is being developed and tested separately from the original publisher. Releases are blocked on independent Apple Developer ID / Windows Authenticode signing, real-provider concurrency/restart stress certification, and independent Cloud/OAuth infrastructure. Unsigned preview builds (`ORGII_BUILD_KIND=local`) are for isolated local testing only and must never be treated as signed production releases.
+**No independently signed TP Agent Studio installers are available yet.** This fork is being developed and tested separately from the original publisher. Releases are blocked on independent Apple Developer ID / Windows Authenticode signing, real-provider concurrency/restart stress certification, and independent Cloud/OAuth infrastructure. Unsigned preview builds are for isolated local testing only and must never be treated as signed production releases.
 
 See [Fork Engineering Guide](FORK.md) for current safety status, macOS M4 build/install instructions, environment configuration, and troubleshooting. Do not mistake upstream installers for releases of this fork.
 
 ## Supported platforms
 
-| Platform                    | Target triple              | Preview packaging (`ORGII_BUILD_KIND=local`) | Status                                                             |
-| --------------------------- | -------------------------- | -------------------------------------------- | ------------------------------------------------------------------ |
-| macOS Apple Silicon (M1–M4) | `aarch64-apple-darwin`     | `.app`, `.dmg`                               | Built & verified locally on Apple M4 (`arm64`, ad-hoc signed `-`)  |
-| Windows 11 x64              | `x86_64-pc-windows-msvc`   | `.exe` (NSIS), `.msi`                        | Built in GitHub Actions preview workflow (`39045826243`, unsigned) |
-| Linux x64                   | `x86_64-unknown-linux-gnu` | `.deb`, `.rpm`                               | Built in GitHub Actions preview workflow (`39045826243`, unsigned) |
+| Platform                    | Target triple              | Preview packaging     | Status                                                             |
+| --------------------------- | -------------------------- | --------------------- | ------------------------------------------------------------------ |
+| macOS Apple Silicon (M1–M4) | `aarch64-apple-darwin`     | `.app`, `.dmg`        | Built & verified locally on Apple M4 (`arm64`, ad-hoc signed `-`)  |
+| Windows 11 x64              | `x86_64-pc-windows-msvc`   | `.exe` (NSIS), `.msi` | Built in GitHub Actions preview workflow (`39045826243`, unsigned) |
+| Linux x64                   | `x86_64-unknown-linux-gnu` | `.deb`, `.rpm`        | Built in GitHub Actions preview workflow (`39045826243`, unsigned) |
 
 ## Develop & build from source (macOS Apple Silicon M4)
 
@@ -272,58 +272,27 @@ pnpm run download:sidecars
 pnpm run tauri:dev
 ```
 
-### 2. Building an installable macOS M4 `.app` and `.dmg` (unsigned preview)
+### 2. Building & installing on macOS M4
 
-`src-tauri/build.rs` enforces provenance guards and accepts only `ORGII_BUILD_KIND=local` or `ORGII_BUILD_KIND=release`. For local or CI unsigned preview builds, always set `ORGII_BUILD_KIND=local` and ad-hoc signing (`APPLE_SIGNING_IDENTITY="-"`):
-
-```bash
-ORGII_BUILD_KIND=local APPLE_SIGNING_IDENTITY="-" \
-  pnpm tauri:build --target aarch64-apple-darwin --bundles app,dmg
-```
-
-This command automatically invokes `scripts/tauri/prepare-sidecars.cjs` (with `--profile release --target aarch64-apple-darwin`) to compile and stage the required `org2-pm` binary into `src-tauri/binaries/org2-pm-aarch64-apple-darwin` before Tauri bundles:
+`src-tauri/build.rs` enforces build-provenance guards and `scripts/tauri/prepare-sidecars.cjs` automatically compiles and stages the required `org2-pm` binary into `src-tauri/binaries/org2-pm-aarch64-apple-darwin` before Tauri bundles:
 
 - `src-tauri/target/aarch64-apple-darwin/release/bundle/macos/TP Agent Studio.app`
 - `src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/TP Agent Studio_2.0.8_aarch64.dmg`
 
-### 3. Installing & launching on macOS M4
+See [FORK.md](FORK.md) for the exact local preview build command, environment/profile isolation variables (`~/.tp-agent-studio`, ports `23847` / `27888`), Gatekeeper `xattr -cr` instructions, and troubleshooting.
 
-1. Open `TP Agent Studio_2.0.8_aarch64.dmg` and drag **TP Agent Studio.app** to `/Applications` (or run directly from the bundle path for isolated testing).
-2. Because preview builds use ad-hoc signing (`-`) rather than an Apple Developer ID certificate, macOS Gatekeeper may quarantine downloaded artifacts. Clear quarantine if needed:
-   ```bash
-   xattr -cr "/Applications/TP Agent Studio.app"
-   ```
-3. Launch with default isolated fork storage (`~/.tp-agent-studio`):
-   ```bash
-   open -a "/Applications/TP Agent Studio.app"
-   ```
+## Optional native sidecars
 
-## Required & optional native sidecars
+Browser Use and Computer Use features rely on optional native helpers for browser automation and macOS screen automation:
 
-1. **Required sidecar (`org2-pm`)**:
-   - Compiled from the workspace crate `src-tauri/crates/pm-cli` (`org2-pm`) and staged at `src-tauri/binaries/org2-pm-<target-triple>` via `scripts/tauri/prepare-sidecars.cjs`.
-   - Automatically built by `pnpm tauri:dev` and `pnpm tauri:build`.
-2. **Optional native sidecars (`agent-browser`, `peekaboo`)**:
-   - Browser Use and Computer Use rely on optional native helpers:
-     - `agent-browser` from `vercel-labs/agent-browser` releases for the current OS/CPU.
-     - `peekaboo` from `steipete/peekaboo` releases on macOS.
-   - If an optional sidecar is missing, `prepare-sidecars.cjs` / `build.rs` creates a small placeholder resource so local builds succeed, and runtime execution falls back to `PATH` until `pnpm run download:sidecars` is run.
+- `agent-browser` is downloaded from `vercel-labs/agent-browser` releases for the current OS/CPU.
+- `peekaboo` is downloaded from `steipete/peekaboo` releases on macOS.
 
-## Environment & profile configuration
+Computer Use is currently available on macOS only. Browser Use can use `agent-browser` on supported platforms.
 
-TP Agent Studio isolates its runtime state from upstream ORG2 (`~/.orgii`) by default:
+If a sidecar is missing, the Rust build creates a small placeholder resource so development builds can continue. The related capability may fall back to `PATH` or remain unavailable until you run `pnpm run download:sidecars`.
 
-| Variable / Setting            | Production default (`TP Agent Studio`)    | Dev default (`TP Agent Studio Dev`)       | Purpose                                                                      |
-| ----------------------------- | ----------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------- |
-| Tauri Identifier              | `com.theerasakping.tpagentstudio`         | `com.theerasakping.tpagentstudio.dev`     | macOS bundle ID & single-instance lock                                       |
-| `ORGII_HOME`                  | `~/.tp-agent-studio`                      | `~/.tp-agent-studio-dev`                  | SQLite databases (`sessions.db`), logs, settings, and Auto-Dream lease locks |
-| `ORGII_EXTERNAL_HISTORY_HOME` | `~/.tp-agent-studio-external-history`     | `~/.tp-agent-studio-dev-external-history` | Imported external CLI session history                                        |
-| `ORGII_IDE_SERVER_PORT`       | `23847`                                   | `23946`                                   | Local IDE WebSocket bridge port                                              |
-| `ORGII_CLI_PROXY_PORT`        | `27888`                                   | `27987`                                   | Local CLI proxy port                                                         |
-| `ORGII_DEEP_LINK_SCHEME`      | `tpagentstudio`                           | `tpagentstudio-dev`                       | Custom URI callback scheme                                                   |
-| `ORGII_BUILD_KIND`            | `local` (preview) / `release` (signed CI) | `local`                                   | Build provenance guard enforced in `src-tauri/build.rs`                      |
-
-For更多 contribution details, see [CONTRIBUTING.md](.github/CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](.github/CODE_OF_CONDUCT.md).
+For more contribution details, see [CONTRIBUTING.md](.github/CONTRIBUTING.md). We ask everyone to be respectful and empathetic; see [CODE_OF_CONDUCT.md](.github/CODE_OF_CONDUCT.md).
 
 ## Community
 

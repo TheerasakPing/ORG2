@@ -10,7 +10,7 @@ The original `.consolidate-lock` protocol wrote the process PID and then read it
 - Hold `fs2::FileExt::try_lock_exclusive` from before the legacy timestamp update until the RAII lease drops. This supplies OS-level advisory file locking across threads and processes on supported platforms.
 - The old `.consolidate-lock` retains its previous timestamp+PID format so existing time-gates and persisted records continue to work.
 - Replace Unix-specific timestamp rollback with cross-platform `std::fs::FileTimes`.
-- Add eight-contender concurrency and same-process reentrancy tests alongside existing commit/rollback tests.
+- Add eight-contender concurrency, same-process reentrancy, and subprocess lock exclusion tests alongside existing commit/rollback tests.
 
 ## Invariants / remaining work
 

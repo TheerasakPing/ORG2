@@ -62,7 +62,7 @@ pub(crate) fn run_persistence_startup_recovery() -> Result<PersistenceStartupRec
     ] {
         if let Err(error) = result {
             tracing::warn!(error = %error, "[StartupRecovery] recovery phase failed");
-            errors.push(error.clone());
+            errors.push(error.to_string());
         }
     }
     if !errors.is_empty() {

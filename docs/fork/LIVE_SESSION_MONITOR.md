@@ -74,8 +74,41 @@ The integration PR must have frontend typecheck, lint, unit-test, production
 build, security and OS-specific validations verified separately. This
 feature does not certify native Rust sessions on macOS M4, Windows 11 or Linux.
 
+## V2 — Native execution-phase events (stacked PR)
+
+The Rust `UnifiedEventHandler` publishes the new content-free
+`agent:monitor_phase` event at three **observed** boundaries:
+
+| Phase | Owning Rust callback | What it proves |
+| --- | --- | --- |
+| `provider_request` | `on_provider_request` | The request callback was entered, not that the model will respond. |
+| `tool_executing` | `on_tool_execute_start` | The tool execution start callback was entered (not merely a proposal). |
+| `tool_finished` | `on_tool_result_with_metadata` | A tool result callback was received, not that the tool succeeded. |
+
+The payload contains only `sessionId`, optional `turnId`, enum `phase`
+and a conservative, length-bounded tool name. Prompts, tool arguments/results,
+file paths, credentials and response bodies are **not** emitted. Group
+projection-only turns suppress the ordinary Session surface to respect
+existing ownership rules. Outdated/cancelled turn callbacks are ignored
+where their lifecycle gates are available.
+
+When the panel is opened, the existing Tauri listener wrapper subscribes
+to that sparse phase event and the existing `agent:complete` /
+`agent:error` terminal events. A bounded in-memory map tracks at most
+128 currently observed Session IDs. Closing the panel drops its listeners
+and ephemeral state. The loaded roster retains authoritative persisted
+status; phase details never overwrite `running`/`failed` or alter the
+real execution pipeline. It does not subscribe to high-frequency
+`message_delta` or `thinking_delta` content.
+
+**Important:** this records **transitions**, not periodic provider
+heartbeats. A single `provider_request` followed by silence could mean
+a slow model, blocked network, paused OS, or a hung future; the Monitor
+must not claim to have determined which. The panel also cannot reconstruct
+the phase of an already-running turn if it was opened after the transition.
+
 **Next phases** (not included in v1):
-1. Rust-native **session-scoped** provider/tool lifecycle heartbeat, with a
+1. Rust-native **session-scoped** provider/tool periodic heartbeat, with a
    monotonic per-turn generation and a bounded event schema that never
    includes tool args or prompts.
 2. Explicit `waiting_for_provider`, `executing_tool`, retry/error,

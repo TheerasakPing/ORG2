@@ -258,7 +258,7 @@ fn inspect(bundle: &Path, agent: &str) -> Result<ResolvedNativeClient, String> {
     // generation avoids reading hundreds of MB from executable/App archives.
     static GENERATION: AtomicU64 = AtomicU64::new(1);
     let generation = GENERATION
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
         .map_err(|_| "Native App generation exhausted")?
         .to_string();
     #[cfg(not(any(target_os = "macos", test)))]

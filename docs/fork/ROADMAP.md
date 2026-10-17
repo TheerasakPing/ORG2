@@ -45,6 +45,7 @@
 - [x] Add a bounded, on-demand live Session Monitor panel using existing Rust roster and CLI hook status signals. See [Live Monitor](LIVE_SESSION_MONITOR.md).
 - [x] Emit content-free native Rust provider-request/tool-execute-start/tool-result transition events and project them into the opened Monitor (stacked PR, acceptance CI pending). These are not periodic heartbeats or proof of provider liveness.
 - [x] Add passive quiet-phase advisories after 5/60 minutes for observed native turns (stacked PR, CI pending). No automatic recovery or hang certainty.
+- [x] Add 15-second scheduler-owned heartbeat signals scoped by Turn epoch and bounded frontend monitor warnings at 45/120 seconds (stacked PR, CI pending). This proves only Tokio task polling, not provider/tool progress or safe automatic recovery.
 - [ ] Build a unified runtime dashboard: tokens, costs, tool latency, retry reason, memory queue, session CPU/RAM, pending approvals.
 - [ ] Add permissions preview and audit receipts for CLI, MCP, desktop and browser execution.
 - [ ] Improve agent-team orchestration with role capabilities, checkpoints, budgets and human approval rules.

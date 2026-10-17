@@ -128,7 +128,7 @@ export function parseDeepLink(
     // earlier (see `parseCloudInviteDeepLink` / `parseCloudShareDeepLink`)
     // and never reach this generic conversion.
 
-    const supportedScheme = /^(?:tpagentstudio(?:-dev|-instance\\d+)?|yorgai|orgii):\/\//i;
+    const supportedScheme = /^(?:tpagentstudio(?:-dev|-instance\d+)?|yorgai|orgii):\/\//i;
     if (!supportedScheme.test(deepLinkUrl)) return null;
     const withoutProtocol = deepLinkUrl.replace(supportedScheme, "");
 
@@ -158,7 +158,7 @@ export function parseDeepLink(
 // Only correct when called AFTER the dedicated cloud parsers had their turn.
 export function isUnclaimedCloudDeepLink(url: string): boolean {
   const trimmed = url.trim();
-  if (!/^(?:orgii|tpagentstudio(?:-dev|-instance\\d+)?):\/\//i.test(trimmed)) return false;
+  if (!/^(?:orgii|tpagentstudio(?:-dev|-instance\d+)?):\/\//i.test(trimmed)) return false;
   try {
     return (
       new URL(trimmed).hostname.toLowerCase() === CLOUD_INVITE_DEEP_LINK_HOST

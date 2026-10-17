@@ -1057,6 +1057,7 @@ agent_sessions::event_pipeline::commands::debug_seed_child_session,
 agent_sessions::event_pipeline::commands::debug_seed_sidebar_coding_session,
 // Unified Session API commands
 agent_sessions::session_directory::commands::session_aggregate_list,
+agent_sessions::worker_overview::agent_scheduler_worker_overview,
 agent_sessions::session_directory::commands::session_native_sidebar_page,
 agent_sessions::session_directory::sections::sidebar_sections_list,
 agent_sessions::session_directory::sections::sidebar_sections_mutate,

@@ -46,6 +46,10 @@
 - [x] Add a bounded, on-demand live Session Monitor panel using existing Rust roster and CLI hook status signals. See [Live Monitor](LIVE_SESSION_MONITOR.md).
 - [x] Emit content-free native Rust provider-request/tool-execute-start/tool-result transition events and project them into the opened Monitor (stacked PR, acceptance CI pending). These are not periodic heartbeats or proof of provider liveness.
 - [x] Emit rate-limited, content-free actual provider-delta progress pulses and read-only no-output advisories (PR awaiting native validation). No periodic scheduler heartbeat, destructive auto-recovery or real concurrency certification yet.
+- [x] Provide a private, bilingual offline Session Health HTML snapshot from SQLite aggregate status counts; this is not live agent activity or a native app tab. See [Session Health Dashboard](SESSION_HEALTH_DASHBOARD.md).
+- [x] Add passive quiet-phase advisories after 5/60 minutes for observed native turns (stacked PR, CI pending). No automatic recovery or hang certainty.
+- [x] Add 15-second scheduler-owned heartbeat signals scoped by Turn epoch and bounded frontend monitor warnings at 45/120 seconds (stacked PR, CI pending). This proves only Tokio task polling, not provider/tool progress or safe automatic recovery.
+- [x] Add in-app Worker Overview sourced from the actual in-memory Rust AgentAppState/DialogScheduler worker handles (stacked PR, CI pending): created, live, busy, idle, dead, queue, maintenance and not-started counts. Excludes CLI/Cloud workers and does not auto-recover.
 - [ ] Build a unified runtime dashboard: tokens, costs, tool latency, retry reason, memory queue, session CPU/RAM, pending approvals.
 - [ ] Add permissions preview and audit receipts for CLI, MCP, desktop and browser execution.
 - [ ] Improve agent-team orchestration with role capabilities, checkpoints, budgets and human approval rules.

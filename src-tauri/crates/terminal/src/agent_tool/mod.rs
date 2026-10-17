@@ -37,6 +37,23 @@ use crate::pty_commands::pty::{encode_pty_output_frame, PtySession, PtySessionId
 use crate::pty_commands::shell_integration;
 use crate::pty_commands::shells::ShellKind;
 
+/// Atomically subtract acknowledged/dropped output bytes without underflow.
+/// A CAS loop keeps this compatible with the project's declared Rust MSRV.
+pub(crate) fn saturating_atomic_sub(counter: &AtomicUsize, bytes: usize) -> usize {
+    let mut before = counter.load(Ordering::Relaxed);
+    loop {
+        match counter.compare_exchange_weak(
+            before,
+            before.saturating_sub(bytes),
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(previous) => return previous,
+            Err(actual) => before = actual,
+        }
+    }
+}
+
 // ============================================
 // Constants
 // ============================================

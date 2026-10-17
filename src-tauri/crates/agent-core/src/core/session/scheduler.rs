@@ -778,6 +778,28 @@ impl WorkerTask {
                             crate::foundation::session_bridge::TurnIntentBridgeStatus::Failed,
                         );
                     }
+                    // If the callback failed before its normal finalizer
+                    // ran, the session DB can still say "running" while the
+                    // in-memory worker has already moved on. Clear that
+                    // phantom status for ordinary failed turns. Never alter
+                    // previously terminal, stale, or intervention-owned work.
+                    if is_turn
+                        && !already_terminal
+                        && !stale_callback
+                        && !user_directed_waiting
+                        && !user_directed_cancelled
+                    {
+                        if let Err(error) = crate::session::persistence::update_status(
+                            &self.session_id,
+                            crate::session::SessionStatus::Failed,
+                        ) {
+                            warn!(
+                                session_id = %self.session_id,
+                                error = %error,
+                                "[scheduler] failed to persist failed turn session status"
+                            );
+                        }
+                    }
                     // Turn-only: an `agent:error` renders as a chat bubble.
                     // Maintenance jobs report failures through their own
                     // channel (e.g. the manual-compact command's reply).

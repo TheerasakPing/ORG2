@@ -18,3 +18,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify fork updater is fail-closed
         run: node scripts/fork/check-safety.mjs
+      - name: Verify fork desktop identity and local data roots
+        run: node scripts/fork/check-identity.mjs
+      - name: Verify JavaScript dev and numbered instance parity
+        run: node --test scripts/tauri/instance-profile.test.cjs
+      - name: Validate packaged two-tone icons
+        run: node scripts/fork/check-icons.mjs

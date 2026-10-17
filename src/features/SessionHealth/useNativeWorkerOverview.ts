@@ -53,7 +53,9 @@ export function useNativeWorkerOverview(): {
       refresh().catch(() => undefined);
     }, 0);
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") refresh().catch(() => undefined);
+      if (document.visibilityState === "visible") {
+        refresh().catch(() => undefined);
+      }
     }, REFRESH_MS);
     return () => {
       window.clearTimeout(initialTimer);

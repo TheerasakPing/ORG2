@@ -37,8 +37,16 @@ a lightweight observation-only Tokio timer.
   executor result/panic handler/finalizer remains authoritative.
 - Only opaque IDs and elapsed time are emitted; user prompts, auth credentials
   and tool arguments are not included.
-- The UI does **not** yet consume this diagnostic event. The wire format
-  is groundwork for a future compact per-session warning indicator.
+- The Rust Session IPC event handler now consumes the diagnostic before
+  normal turn-status processing; the diagnostic **cannot start a new Turn**.
+- A bounded (128-session) frontend warning store updates only listeners
+  subscribed to the affected Session. Terminal, idle and new-turn events
+  clear the previous warning; unmounting unsubscribes the Status Trail.
+- The chat Status Trail displays a localized **may still be working** notice
+  for the current running Session (15 existing locales). It does not
+  announce a confirmed hang or offer an unsafe one-click replay.
+- No new polling, logging of prompt text, or live-event history persistence
+  is added on the frontend.
 
 ## Tested behavior (source tests added; CI execution pending)
 
@@ -48,8 +56,14 @@ a lightweight observation-only Tokio timer.
    the executor preserved and completed after explicit release.
 3. A completed job not producing a delayed warning after its timer expires.
 
-The tests use `start_paused = true` and `tokio::time::advance`, not
-40-minute real-time sleeps.
+The Rust tests use `start_paused = true` and `tokio::time::advance`, not
+40-minute real-time sleeps. Tokio's virtual clock is enabled only for
+agent-core dev-dependencies.
+
+Frontend tests additionally cover session isolation, malformed/cross-session
+payload rejection, warning-count dedup, terminal/new-turn cleanup, bounded
+storage and Status Trail display. These tests are **committed, not yet
+validated by full CI** (no new PR run was started).
 
 ## Open work before calling this a true stall detector
 
@@ -60,8 +74,9 @@ The tests use `start_paused = true` and `tokio::time::advance`, not
 - Distinguish waiting for user approval from network/rate-limit waiting.
 - Implement bounded provider timeouts with explicit opt-in retry policy;
   **never** automatically replay a command with possible side effects.
-- Add UX: `Running for N min` / `Waiting for approval` / `May be stalled`,
-  user-owned Stop and safe Retry only after reconciliation.
+- Expand UI beyond the first localized observation-only label: correlate
+  real progress and distinguish `Waiting for approval` vs `May be stalled`,
+  with user-owned Stop and safe Retry only after reconciliation.
 - Run 1/5/20/50-session stress and forced close/relaunch tests with durable
   turn-intent/status recovery on macOS M4, Windows 11 and Linux.
 

@@ -1,0 +1,108 @@
+/**
+ * Runtime signals from the Rust TurnEventHandler. This is a phase transition
+ * stream, NOT an instrumented watchdog or proof that a future is progressing.
+ * Never hold prompts, tool args, provider URLs or error bodies here.
+ */
+export const NATIVE_PHASE_EVENT = "agent:monitor_phase";
+export const MAX_NATIVE_PHASE_RECORDS = 128;
+
+export type NativePhase = "provider_request" | "tool_executing" | "tool_finished";
+export interface NativePhaseObservation {
+  turnId: string | null;
+  phase: NativePhase;
+  tool: string | null;
+  observedAtMs: number;
+}
+export type NativePhaseMap = ReadonlyMap<string, NativePhaseObservation>;
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+  return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function validId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 256;
+}
+
+function safeToolName(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  return /^[a-zA-Z][a-zA-Z0-9_./-]{0,47}$/.test(input) ? input : null;
+}
+
+function phaseOf(value: unknown): NativePhase | null {
+  switch (value) {
+    case "provider_request":
+    case "tool_executing":
+    case "tool_finished":
+      return value;
+    default:
+      return null;
+  }
+}
+
+/** Accept only a deliberately strict allowlist, dropping extra payload keys. */
+export function ingestNativePhase(
+  current: NativePhaseMap,
+  payload: unknown,
+  nowMs = Date.now()
+): NativePhaseMap {
+  if (!isRecord(payload) || !validId(payload.sessionId)) return current;
+  const phase = phaseOf(payload.phase);
+  if (!phase) return current;
+  if (payload.turnId != null && !validId(payload.turnId)) return current;
+  if (!Number.isFinite(nowMs) || nowMs < 0) return current;
+  const id = payload.sessionId;
+  const previous = current.get(id);
+  const turnId = typeof payload.turnId === "string" ? payload.turnId : null;
+
+  // The Rust handler owns an execution-generation guard, but still defend
+  // against a delayed completion from the last turn on the client.
+  if (
+    previous?.turnId && turnId &&
+    previous.turnId !== turnId &&
+    phase === "tool_finished"
+  ) return current;
+  const next = new Map(current);
+  next.delete(id);
+  next.set(id, {
+    turnId,
+    phase,
+    tool: phase === "provider_request" ? null : safeToolName(payload.tool),
+    observedAtMs: nowMs,
+  });
+  while (next.size > MAX_NATIVE_PHASE_RECORDS) {
+    const first = next.keys().next().value;
+    if (first === undefined) break;
+    next.delete(first);
+  }
+  return next;
+}
+
+/** Turn completion/error retracts the indication, not the underlying session. */
+export function clearNativePhase(
+  current: NativePhaseMap,
+  payload: unknown
+): NativePhaseMap {
+  if (!isRecord(payload) || !validId(payload.sessionId)) return current;
+  const existing = current.get(payload.sessionId);
+  if (!existing) return current;
+  if (payload.turnId != null && !validId(payload.turnId)) return current;
+  if (
+    existing.turnId &&
+    typeof payload.turnId === "string" &&
+    existing.turnId !== payload.turnId
+  ) return current;
+  const next = new Map(current);
+  next.delete(payload.sessionId);
+  return next;
+}
+
+export function nativePhaseDescription(phase: NativePhase, tool: string | null): string {
+  switch (phase) {
+    case "provider_request":
+      return "Rust: entered provider request · รอผลจากโมเดล (ยังไม่ใช่ heartbeat)";
+    case "tool_executing":
+      return "Rust: tool execution started" + (tool ? " · " + tool : "");
+    case "tool_finished":
+      return "Rust: tool result received" + (tool ? " · " + tool : "");
+  }
+}

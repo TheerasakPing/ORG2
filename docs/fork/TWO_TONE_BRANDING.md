@@ -17,7 +17,7 @@ The fork's native desktop app uses **exactly two brand inks**: Midnight Navy `#1
 
 ## Regenerating
 
-SVG is the editable artwork. Rasterize to the same resolutions, package the PNG/ICO/ICNS resources, and run `node scripts/fork/check-icons.mjs`. The app's image validation is part of the fork-safety CI workflow. When changing the two color codes or path geometry, update both source SVGs and all bundled binary targets in the same pull request; do not ship the original ORG2 icon accidentally.
+SVG is the editable artwork. Rasterize to 8-bit RGBA PNG (not indexed PNG, which Tauri rejects at build time), package the PNG/ICO/ICNS resources, and run `node scripts/fork/check-icons.mjs`. The app's image validation is part of the fork-safety CI workflow. When changing the two color codes or path geometry, update both source SVGs and all bundled binary targets in the same pull request; do not ship the original ORG2 icon accidentally.
 
 ## Remaining branding work
 

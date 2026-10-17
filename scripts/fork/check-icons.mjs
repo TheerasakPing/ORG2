@@ -12,37 +12,48 @@ const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const navy = [16, 29, 51];
 const cyan = [77, 216, 245];
 
-function png(path, expectedSize) {
-  const data = file(path);
-  assert.ok(data.subarray(0, 8).equals(sig), path + ' missing PNG signature');
-  let offset = 8, width, height, palette, alpha, raw;
+function assertRgbaPng(data, expectedSize, label) {
+  assert.ok(data.subarray(0, 8).equals(sig), label + ' missing PNG signature');
+  let offset = 8, width, height, raw = [];
   while (offset + 12 <= data.length) {
     const n = data.readUInt32BE(offset), type = data.toString('ascii', offset + 4, offset + 8);
-    assert.ok(offset + n + 12 <= data.length, path + ' has malformed chunk');
+    assert.ok(offset + n + 12 <= data.length, label + ' malformed PNG chunk');
     const payload = data.subarray(offset + 8, offset + 8 + n);
     if (type === 'IHDR') {
       width = payload.readUInt32BE(0); height = payload.readUInt32BE(4);
-      assert.equal(payload[8], 8, 'Expected 8-bit palette');
-      assert.equal(payload[9], 3, 'Expected paletted PNG');
+      assert.equal(payload[8], 8, label + ' must use 8-bit channels');
+      assert.equal(payload[9], 6, label + ' must use RGBA PNG, not indexed color');
     }
-    if (type === 'PLTE') palette = payload;
-    if (type === 'tRNS') alpha = payload;
-    if (type === 'IDAT') raw = raw ? Buffer.concat([raw, payload]) : payload;
+    if (type === 'IDAT') raw.push(payload);
     offset += 12 + n;
     if (type === 'IEND') break;
   }
-  assert.equal(width, expectedSize, path + ' incorrect width');
-  assert.equal(height, expectedSize, path + ' incorrect height');
-  assert.ok(palette && alpha && raw, path + ' missing palette/transparency/pixels');
-  assert.equal(palette.length / 3, alpha.length, 'Palette alpha mismatch');
-  assert.deepEqual([...palette.subarray(0, 3)], navy, 'Expected midnight navy base');
-  assert.deepEqual([...palette.subarray(palette.length - 3)], cyan, 'Expected electric cyan accent');
-  const pixels = inflateSync(raw);
-  assert.equal(pixels.length, (width + 1) * height, path + ' invalid pixel scanlines');
-  for (let y = 0; y < height; y++) {
-    assert.equal(pixels[y * (width + 1)], 0, 'Unexpected PNG filter type');
+  if (expectedSize !== undefined) {
+    assert.equal(width, expectedSize, label + ' incorrect width');
+    assert.equal(height, expectedSize, label + ' incorrect height');
   }
+  assert.ok(raw.length > 0, label + ' missing image data');
+  const pixels = inflateSync(Buffer.concat(raw));
+  const stride = width * 4 + 1;
+  assert.equal(pixels.length, stride * height, label + ' invalid pixel scanlines');
+  let navyCount = 0, cyanCount = 0, transparentCount = 0;
+  for (let y = 0; y < height; y++) {
+    assert.equal(pixels[y * stride], 0, label + ' unexpected scanline filter');
+    for (let x = 0; x < width; x++) {
+      const p = y * stride + 1 + x * 4;
+      const rgb = [...pixels.subarray(p, p + 3)], a = pixels[p + 3];
+      if (a === 0) transparentCount++;
+      if (a === 255 && rgb.every((v, i) => v === navy[i])) navyCount++;
+      if (a === 255 && rgb.every((v, i) => v === cyan[i])) cyanCount++;
+    }
+  }
+  assert.ok(navyCount > 0 && cyanCount > 0 && transparentCount > 0,
+    label + ' must preserve both opaque brand inks and transparent corners');
   return data;
+}
+
+function png(path, expectedSize) {
+  return assertRgbaPng(file(path), expectedSize, path);
 }
 
 function ico(path) {
@@ -55,9 +66,7 @@ function ico(path) {
     const entry = 6 + i * 16, len = data.readUInt32LE(entry + 8), offset = data.readUInt32LE(entry + 12);
     assert.ok(offset + len <= data.length && len > 0, 'ICO image outside file');
     assert.ok(data.subarray(offset, offset + 8).equals(sig), 'ICO image not PNG');
-    assert.equal(data[offset + 24], 8, 'ICO PNG must use 8-bit channels');
-    assert.equal(data[offset + 25], 6,
-      'ICO PNG must use RGBA (PNG color type 6); indexed PNG crashes Tauri on Windows');
+    assertRgbaPng(data.subarray(offset, offset + len), undefined, path + ' frame ' + i);
   }
 }
 
@@ -69,7 +78,7 @@ function icns(path) {
   while (offset < data.length) {
     const len = data.readUInt32BE(offset + 4);
     assert.ok(len > 8 && offset + len <= data.length, 'Malformed ICNS entry');
-    assert.ok(data.subarray(offset + 8, offset + 16).equals(sig), 'ICNS bitmap not PNG');
+    assertRgbaPng(data.subarray(offset + 8, offset + len), undefined, path + ' entry ' + entries);
     offset += len; entries++;
   }
   assert.ok(entries >= 6, 'ICNS lacks high-DPI variants');

@@ -53,21 +53,6 @@ fn consume_expected_escape(counter: &AtomicU32) -> bool {
     false
 }
 
-#[cfg(test)]
-mod atomic_escape_tests {
-    use super::consume_expected_escape;
-    use std::sync::atomic::{AtomicU32, Ordering};
-
-    #[test]
-    fn expected_escapes_are_consumed_once() {
-        let count = AtomicU32::new(2);
-        assert!(consume_expected_escape(&count));
-        assert!(consume_expected_escape(&count));
-        assert!(!consume_expected_escape(&count));
-        assert_eq!(count.load(Ordering::SeqCst), 0);
-    }
-}
-
 /// Enable or disable the abort action (the tap itself keeps running).
 pub fn set_enabled(enabled: bool) {
     ENABLED.store(enabled, Ordering::Relaxed);
@@ -215,3 +200,19 @@ fn run_event_tap() {
         CFRelease(tap);
     }
 }
+
+#[cfg(test)]
+mod atomic_escape_tests {
+    use super::consume_expected_escape;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    #[test]
+    fn expected_escapes_are_consumed_once() {
+        let count = AtomicU32::new(2);
+        assert!(consume_expected_escape(&count));
+        assert!(consume_expected_escape(&count));
+        assert!(!consume_expected_escape(&count));
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+}
+

@@ -1,0 +1,30 @@
+name: Session diagnostics smoke
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/fork/session_doctor.py'
+      - 'scripts/fork/session_health_dashboard.py'
+      - 'scripts/fork/test_session_doctor.py'
+      - '.github/workflows/session-diagnostics.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scripts/fork/session_doctor.py'
+      - 'scripts/fork/session_health_dashboard.py'
+      - 'scripts/fork/test_session_doctor.py'
+      - '.github/workflows/session-diagnostics.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  session-diagnostics:
+    name: Offline SQLite regression (no Rust build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run dependency-free session diagnostics tests
+        run: python3 -m unittest discover -s scripts/fork -p 'test_session_doctor.py' -v

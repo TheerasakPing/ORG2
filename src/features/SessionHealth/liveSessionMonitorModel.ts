@@ -5,6 +5,8 @@
 import type { AgentLiveStatus } from "@src/api/tauri/rpc/schemas/agentOrgs";
 import type { Session } from "@src/store/session/sessionAtom/types";
 
+import { nativePhaseDescription, type NativePhaseMap } from "./nativePhaseEvents";
+
 const BUSY_STATUSES = new Set([
   "running", "in_progress", "installing", "pending", "queued",
   "waiting_for_funds",
@@ -29,7 +31,7 @@ export interface LiveSessionRow {
   phase: MonitorPhase;
   /** Provider/tool phase is unknown for native Rust rows without a hook. */
   detail: string;
-  source: "cli-hook" | "session-roster";
+  source: "cli-hook" | "native-phase" | "session-roster";
   /** Only means the persisted row has not updated recently; NOT a hang. */
   oldPersistedStatus: boolean;
   updatedAtMs: number | null;
@@ -67,6 +69,7 @@ export function deriveLiveSessionSummary(
     activeOnly?: boolean;
     nowMs?: number;
     maxRows?: number;
+    nativePhases?: NativePhaseMap;
   } = {}
 ): LiveSessionSummary {
   const nowMs = options.nowMs ?? Date.now();
@@ -99,7 +102,13 @@ export function deriveLiveSessionSummary(
     if (oldPersistedStatus) olderStatus++;
 
     const tool = hook?.status === "running" ? safeToolName(hook.toolName) : null;
-    const detail = hook
+    // The status remains Rust/CLI-owned. Only the visible detail is enhanced
+    // with the last observed content-free native execution transition.
+    const native = hook ? undefined : options.nativePhases?.get(session.session_id);
+    const observedNative = phase === "working" ? native : undefined;
+    const detail = observedNative
+      ? nativePhaseDescription(observedNative.phase, observedNative.tool)
+      : hook
       ? hook.status === "waiting_for_user"
         ? "CLI hook: waiting for user"
         : tool
@@ -113,7 +122,7 @@ export function deriveLiveSessionSummary(
       status,
       phase,
       detail,
-      source: hook ? "cli-hook" : "session-roster",
+      source: hook ? "cli-hook" : observedNative ? "native-phase" : "session-roster",
       oldPersistedStatus,
       updatedAtMs,
     });

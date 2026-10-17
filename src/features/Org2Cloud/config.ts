@@ -77,9 +77,10 @@ export const ORG2_CLOUD_ENDPOINT_OVERRIDE_STORAGE_KEY =
  * HTTPS absolute URL, with an explicit HTTP exception for loopback-only
  * development endpoints. A remote custom deployment must never downgrade
  * to cleartext, while local Supabase and self-hosted smoke tests need to run
- * without provisioning a fake certificate. Trailing slashes are stripped — consumers build paths as
- * `${url}/rest/v1/…`, so `https://x.supabase.co/` would otherwise put a
- * `//` into every request URL.
+ * without provisioning a fake certificate. Both values must be origins:
+ * embedded credentials, non-root paths, search parameters and fragments are
+ * rejected. Valid values are canonicalized with `new URL(value).origin`
+ * before API paths such as `/rest/v1/…` are constructed.
  */
 const CloudEndpointUrlSchema = z
   .string()

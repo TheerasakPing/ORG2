@@ -425,6 +425,13 @@ mod tests {
     fn rollback_restores_previous_timestamp_across_platforms() {
         let tmp = TempDir::new().unwrap();
         record_consolidation(tmp.path()).unwrap();
+        // Move the timestamp beyond the stale PID threshold so the next
+        // acquisition is eligible while retaining a nonzero prior mtime.
+        let previous = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64 - HOLDER_STALE_MS - 60_000;
+        set_file_mtime(&lock_path(tmp.path()), previous).unwrap();
         let prior = read_last_consolidated_at(tmp.path());
         let lease = try_acquire_lease(tmp.path()).unwrap().unwrap();
         drop(lease);

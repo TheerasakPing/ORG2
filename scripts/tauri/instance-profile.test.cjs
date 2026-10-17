@@ -59,7 +59,7 @@ test("instance 2 receives isolated identity, schemes, and ports", () => {
   assert.equal(profile.authDeepLinkScheme, "tpagentstudio-instance2");
   assert.equal(profile.ideServerPort, 23848);
   assert.equal(profile.cliProxyPort, 27889);
-  assert.match(profile.dataHome, /\.tpagentstudio-instance2$/);
+  assert.match(profile.dataHome, /\.tp-agent-studio-instance2$/);
 });
 
 test("primary and unbounded instance ids are rejected", () => {

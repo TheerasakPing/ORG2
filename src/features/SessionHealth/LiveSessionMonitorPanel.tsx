@@ -13,6 +13,16 @@ import {
   type LiveSessionRow,
   deriveLiveSessionSummary,
 } from "./liveSessionMonitorModel";
+import { NativeWorkerOverviewSection } from "./NativeWorkerOverviewSection";
+import { countQuietSessions, phaseAdvisory } from "./sessionStallAdvisory";
+import {
+  SCHEDULER_HEARTBEAT_EVENT,
+  type SchedulerPulseMap,
+  countSchedulerPulseHealth,
+  ingestSchedulerPulse,
+  schedulerPulseHealth,
+  schedulerPulseMessage,
+} from "./schedulerHeartbeat";
 import {
   NATIVE_PHASE_EVENT,
   NATIVE_PROGRESS_EVENT,
@@ -46,7 +56,17 @@ const STATUS_LABELS: Record<string, string> = {
   archived: "เก็บแล้ว / Archived",
 };
 
-function StatusRow({ row }: { row: LiveSessionRow }) {
+function StatusRow({
+  row,
+  caution,
+  workerPulseNote,
+  workerPulseAlert,
+}: {
+  row: LiveSessionRow;
+  caution: string | null;
+  workerPulseNote: string | null;
+  workerPulseAlert: boolean;
+}) {
   const color =
     row.phase === "working"
       ? "bg-cyan-500"
@@ -83,6 +103,16 @@ function StatusRow({ row }: { row: LiveSessionRow }) {
               ⚠ {row.quietWarning}
             </p>
           )}
+          {caution && (
+            <p className="mt-1 text-[11px] text-amber-600">{caution}</p>
+          )}
+          {workerPulseNote && (
+            <p
+              className={`mt-1 text-[11px] ${workerPulseAlert ? "text-amber-600" : "text-text-3"}`}
+            >
+              {workerPulseNote}
+            </p>
+          )}
           {row.oldPersistedStatus && (
             <p className="mt-1 text-[11px] text-amber-600">
               ข้อมูลสถานะในฐานข้อมูลเก่ากว่า 10 นาที · ตรวจสอบเพิ่มเติม
@@ -107,9 +137,16 @@ export default function LiveSessionMonitorPanel({
     () => new Map()
   );
 
-  // Three low-volume Tauri event subscriptions only while expanded.
+  const [schedulerPulses, setSchedulerPulses] = useState<SchedulerPulseMap>(
+    () => new Map()
+  );
+
+  // Five low-volume Tauri event subscriptions only while expanded.
   // Payloads are validated and minimized before state ingestion. Never
   // subscribe to high-frequency message or thinking delta streams here.
+  useTauriListen<unknown>(SCHEDULER_HEARTBEAT_EVENT, (payload) => {
+    setSchedulerPulses((previous) => ingestSchedulerPulse(previous, payload));
+  });
   useTauriListen<unknown>(NATIVE_PHASE_EVENT, (payload) => {
     setNativePhases((previous) => ingestNativePhase(previous, payload));
   });
@@ -148,6 +185,20 @@ export default function LiveSessionMonitorPanel({
       }),
     [sessions, hookStatuses, activeOnly, nowMs, nativePhases]
   );
+
+  const quietCounts = useMemo(() => {
+    const activeNativeIds = summary.rows
+      .filter((row) => row.phase === "working" && row.source === "native-phase")
+      .map((row) => row.id);
+    return countQuietSessions(activeNativeIds, nativePhases, nowMs);
+  }, [summary.rows, nativePhases, nowMs]);
+
+  const workerPulseCounts = useMemo(() => {
+    const localActiveIds = summary.rows
+      .filter((row) => row.phase === "working" && row.source !== "cli-hook")
+      .map((row) => row.id);
+    return countSchedulerPulseHealth(localActiveIds, schedulerPulses, nowMs);
+  }, [summary.rows, schedulerPulses, nowMs]);
 
   const refresh = async () => {
     if (refreshing) return;
@@ -210,6 +261,22 @@ export default function LiveSessionMonitorPanel({
             <div className="text-[10px] text-text-2">ข้อมูลเก่า</div>
           </div>
         </div>
+        <p
+          className="mt-2 text-[11px] text-text-3"
+          data-testid="session-monitor-silence-summary"
+        >
+          Phase silence: {quietCounts.quiet} quiet ≥5m · {quietCounts.expired} old ≥60m
+          {" · "}Only {quietCounts.observed} observed native turns
+        </p>
+        <p
+          className="mt-1 text-[11px] text-text-3"
+          data-testid="session-monitor-worker-heartbeat-summary"
+        >
+          Scheduler heartbeat: {workerPulseCounts.recent} recent ·{" "}
+          {workerPulseCounts.late} late ≥45s{" · "}
+          {workerPulseCounts.missing} missing ≥2m{" · "}
+          {workerPulseCounts.unknown} unobserved
+        </p>
         <div className="mt-3 flex items-center justify-between gap-2 text-xs">
           <label className="flex items-center gap-2 text-text-2">
             <input
@@ -235,6 +302,7 @@ export default function LiveSessionMonitorPanel({
         )}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <NativeWorkerOverviewSection />
         <p className="mb-3 text-[11px] text-text-3">
           แสดง {summary.visibleCount} จาก {summary.totalLoaded} Session
           ในรายการที่โหลดแล้ว
@@ -242,9 +310,32 @@ export default function LiveSessionMonitorPanel({
         </p>
         {summary.rows.length ? (
           <ul className="space-y-2">
-            {summary.rows.map((row) => (
-              <StatusRow row={row} key={row.id} />
-            ))}
+            {summary.rows.map((row) => {
+              const advisory =
+                row.phase === "working" && row.source === "native-phase"
+                  ? phaseAdvisory(row.id, nativePhases, nowMs)
+                  : null;
+              const caution =
+                !row.quietWarning &&
+                (advisory?.state === "quiet" || advisory?.state === "expired")
+                  ? advisory.message
+                  : null;
+              const pulse =
+                row.phase === "working" && row.source !== "cli-hook"
+                  ? schedulerPulseHealth(schedulerPulses.get(row.id), nowMs)
+                  : "unknown";
+              const workerPulseNote =
+                pulse === "unknown" ? null : schedulerPulseMessage(pulse);
+              return (
+                <StatusRow
+                  row={row}
+                  caution={caution}
+                  workerPulseNote={workerPulseNote}
+                  workerPulseAlert={pulse === "late" || pulse === "missing"}
+                  key={row.id}
+                />
+              );
+            })}
           </ul>
         ) : (
           <p className="rounded-xl border border-dashed border-border-2 p-6 text-center text-sm text-text-2">

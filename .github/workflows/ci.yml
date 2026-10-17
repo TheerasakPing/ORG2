@@ -5,10 +5,9 @@
 # clippy signal at all, so a defect could only be found after the whole stack
 # landed. The scope job below still keeps the cost proportional to the diff.
 #
-# Frontend starts immediately. A lightweight scope job decides whether the
-# Rust job is relevant; frontend and ordinary Markdown documentation diffs
-# keep the required Rust check but mark it skipped/successful without
-# allocating a macOS runner.
+# Frontend quality, web build, and affected tests run independently.
+# macOS Clippy and full workspace tests also run concurrently. Original
+# required checks remain as strict fan-in gates; Rust scope is diff-based.
 #
 # Within the frontend job, lint covers only the files the pull request changed
 # (see scripts/ci/select-lint-targets.cjs), and unit tests cover only the test
@@ -107,8 +106,8 @@ jobs:
           echo "Audit required: ${audit_required}"
 
   # ── Frontend ────────────────────────────────────────────────────────────────
-  frontend:
-    name: Frontend (typecheck · lint · test)
+  frontend-quality:
+    name: Frontend (quality · typecheck · lint)
     runs-on: ubuntu-latest
 
     steps:
@@ -188,11 +187,6 @@ jobs:
       - name: i18n contracts
         run: pnpm check:i18n:contracts
 
-      - name: Web production build
-        run: pnpm build:web
-        env:
-          NODE_OPTIONS: "--max-old-space-size=6144"
-
       # nightly-full-checks.yml relints the whole tree once a day, so a rule
       # that starts failing on untouched files still surfaces within 24h.
       - name: Lint (changed files)
@@ -230,6 +224,65 @@ jobs:
           pnpm run test:i18n-keys
           pnpm run check:i18n-keys
 
+  frontend-web:
+    name: Frontend (production build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Cache node_modules
+        uses: actions/cache@v5
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Web production build
+        run: pnpm build:web
+        env:
+          NODE_OPTIONS: "--max-old-space-size=6144"
+
+  frontend-tests:
+    name: Frontend (affected unit tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout (full history for PR diff)
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Cache node_modules
+        uses: actions/cache@v5
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       # Runs the test files this pull request can affect, selected from each
       # file's Vitest import graph; dependency, config, and setup-file changes
       # run the whole suite. The step summary lists the selection and its
@@ -246,9 +299,25 @@ jobs:
             > "${RUNNER_TEMP}/unit-test-paths"
           node scripts/ci/run-unit-tests.mjs < "${RUNNER_TEMP}/unit-test-paths"
 
+  # Fail-closed compatibility gate: keep existing required-check name.
+  frontend:
+    name: Frontend (typecheck · lint · test)
+    needs: [frontend-quality, frontend-web, frontend-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every frontend subjob
+        env:
+          QUALITY: ${{ needs.frontend-quality.result }}
+          WEB: ${{ needs.frontend-web.result }}
+          TESTS: ${{ needs.frontend-tests.result }}
+        run: |
+          echo "Frontend quality: ${QUALITY}; web build: ${WEB}; tests: ${TESTS}"
+          [[ "${QUALITY}" == "success" && "${WEB}" == "success" && "${TESTS}" == "success" ]]
+
   # ── Rust ────────────────────────────────────────────────────────────────────
-  rust:
-    name: Rust (clippy)
+  rust-clippy:
+    name: Rust (macOS Clippy)
     needs: changes
     if: needs.changes.outputs.rust_required == 'true'
     runs-on: macos-latest
@@ -268,6 +337,7 @@ jobs:
         with:
           workspaces: "./src-tauri -> target"
           shared-key: "ci-macos"
+          save-if: false
 
       - name: Stage org2-pm sidecar
         run: node scripts/tauri/prepare-sidecars.cjs --profile debug
@@ -279,14 +349,51 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # `--workspace` is load-bearing: src-tauri/Cargo.toml lists "." plus 44
-      # member crates and sets no `default-members`, so a bare `cargo test` here
-      # would run the root package only and skip ~5700 tests. Clippy above has
-      # already built every test target against the same cache, so this step is
-      # mostly link plus ~1 min of execution for ~6800 tests.
+  rust-tests:
+    name: Rust (macOS workspace tests)
+    needs: changes
+    if: needs.changes.outputs.rust_required == 'true'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: "ci-macos"
+          cache-on-failure: true
+      - name: Stage org2-pm sidecar
+        run: node scripts/tauri/prepare-sidecars.cjs --profile debug
       - name: cargo test (workspace)
         working-directory: src-tauri
         run: cargo test --workspace --no-fail-fast
+
+  # Original required check now also gates the separately executed workspace tests.
+  rust:
+    name: Rust (clippy)
+    needs: [changes, rust-clippy, rust-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce all required macOS Rust checks
+        env:
+          SCOPE: ${{ needs.changes.result }}
+          RUST_REQUIRED: ${{ needs.changes.outputs.rust_required }}
+          CLIPPY: ${{ needs.rust-clippy.result }}
+          TESTS: ${{ needs.rust-tests.result }}
+        run: |
+          echo "Scope: ${SCOPE}; rust required: ${RUST_REQUIRED}"
+          echo "Clippy: ${CLIPPY}; workspace tests: ${TESTS}"
+          [[ "${SCOPE}" == "success" ]] || exit 1
+          if [[ "${RUST_REQUIRED}" == "false" ]]; then
+            [[ "${CLIPPY}" == "skipped" && "${TESTS}" == "skipped" ]]
+            exit
+          fi
+          [[ "${RUST_REQUIRED}" == "true" ]] || exit 1
+          [[ "${CLIPPY}" == "success" && "${TESTS}" == "success" ]]
 
   # ── Rust (Windows) ──────────────────────────────────────────────────────────
   # The macOS job above cannot see a `#[cfg(windows)]` / `#[cfg(unix)]` split

@@ -87,6 +87,18 @@ const CloudEndpointUrlSchema = z
   .refine((value) => {
     try {
       const url = new URL(value);
+      // Both fields are endpoint ORIGINS, not arbitrary navigation URLs.
+      // Credentials, paths, queries and fragments would make endpoint
+      // switching ambiguous and can leak secrets through browser requests.
+      if (
+        url.username ||
+        url.password ||
+        url.pathname !== "/" ||
+        url.search ||
+        url.hash
+      ) {
+        return false;
+      }
       if (url.protocol === "https:") return true;
       return (
         url.protocol === "http:" &&
@@ -96,7 +108,7 @@ const CloudEndpointUrlSchema = z
       return false;
     }
   }, "https URL or loopback http URL required")
-  .transform((value) => value.replace(/\/+$/, ""));
+  .transform((value) => new URL(value).origin);
 
 export const Org2CloudEndpointOverrideSchema = z.object({
   /** Origin of the deployment's web app (login, billing, …). */

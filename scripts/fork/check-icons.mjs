@@ -55,6 +55,9 @@ function ico(path) {
     const entry = 6 + i * 16, len = data.readUInt32LE(entry + 8), offset = data.readUInt32LE(entry + 12);
     assert.ok(offset + len <= data.length && len > 0, 'ICO image outside file');
     assert.ok(data.subarray(offset, offset + 8).equals(sig), 'ICO image not PNG');
+    assert.equal(data[offset + 24], 8, 'ICO PNG must use 8-bit channels');
+    assert.equal(data[offset + 25], 6,
+      'ICO PNG must use RGBA (PNG color type 6); indexed PNG crashes Tauri on Windows');
   }
 }
 

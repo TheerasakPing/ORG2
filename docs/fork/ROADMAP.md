@@ -3,6 +3,7 @@
 **Status:** Planning and initial release-safety changes, not a production release.
 **Repository:** https://github.com/TheerasakPing/ORG2
 **Upstream:** https://github.com/org2AI/ORG2
+**Tracking:** GitHub Issues are currently disabled on this fork; this file is the active task checklist until Issues are enabled.
 
 ## P0 — Safe ownership and packaging (must pass before installers)
 

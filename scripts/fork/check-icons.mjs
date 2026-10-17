@@ -2,10 +2,11 @@
 // Validate the actual shipped two-tone desktop bitmaps, not only their source.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
 
-const root = resolve(import.meta.dirname ?? '.', '../../');
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const file = (p) => readFileSync(resolve(root, p));
 const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const navy = [16, 29, 51];
@@ -100,7 +101,7 @@ for (const path of ['assets/branding/tp-agent-studio.svg', 'assets/branding/tp-a
 for (const configFile of ['src-tauri/tauri.conf.json', 'src-tauri/tauri.dev.conf.json']) {
   const config = JSON.parse(file(configFile).toString('utf8'));
   for (const icon of config.bundle.icon) {
-    file(resolve('src-tauri', icon));
+    file('src-tauri/' + icon);
   }
 }
 console.log('Two-tone desktop icon sources, multi-resolution PNG, ICO and ICNS passed');

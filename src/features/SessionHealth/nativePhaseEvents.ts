@@ -86,11 +86,9 @@ export function clearNativePhase(
   const existing = current.get(payload.sessionId);
   if (!existing) return current;
   if (payload.turnId != null && !validId(payload.turnId)) return current;
-  if (
-    existing.turnId &&
-    typeof payload.turnId === "string" &&
-    existing.turnId !== payload.turnId
-  ) return current;
+  // Some legacy agent:error payloads omit turnId. Never allow an
+  // unscoped terminal to erase a known newer turn's progress indication.
+  if (existing.turnId && payload.turnId !== existing.turnId) return current;
   const next = new Map(current);
   next.delete(payload.sessionId);
   return next;

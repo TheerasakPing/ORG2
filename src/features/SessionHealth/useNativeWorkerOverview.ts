@@ -46,11 +46,16 @@ export function useNativeWorkerOverview(): {
 
   useEffect(() => {
     generation.current += 1;
-    void refresh();
+    // Schedule the initial IPC request after effect setup. React effects must
+    // not synchronously trigger a state update during their execution.
+    const initialTimer = window.setTimeout(() => {
+      void refresh();
+    }, 0);
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
     }, REFRESH_MS);
     return () => {
+      window.clearTimeout(initialTimer);
       window.clearInterval(timer);
       generation.current += 1;
       inFlight.current = null;

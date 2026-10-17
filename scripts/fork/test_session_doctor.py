@@ -130,5 +130,122 @@ class SessionDoctorTests(unittest.TestCase):
         conn.close()
 
 
+
+class SessionHealthDashboardTests(unittest.TestCase):
+    """A rendered offline report never contains source database content."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.db = self.root / "sessions.db"
+        self.out = self.root / "session-health.html"
+        self.dashboard = MODULE_PATH.with_name("session_health_dashboard.py")
+        self.assertTrue(self.dashboard.is_file())
+        conn = sqlite3.connect(self.db)
+        conn.execute(
+            "CREATE TABLE agent_sessions "
+            "(status TEXT, updated_at TEXT, secret_prompt TEXT, secret_token TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO agent_sessions VALUES (?, ?, ?, ?)",
+            [
+                ("running", "2020-01-01T00:00:00Z", "SECRET-PROMPT-DO-NOT-EMIT",
+                 "sk-test-private"),
+                ("running", "future-not-a-date", "PRIVATE-PROMPT", "sk-private"),
+                ("completed", "2026-01-01T00:00:00Z", "content", "token"),
+                ("private@example.com", "2026-01-01T00:00:00Z",
+                 "PRIVATE EMAIL", "token"),
+            ],
+        )
+        conn.commit()
+        conn.close()
+
+    def run_dashboard(self, *options: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable, str(self.dashboard), "--db", str(self.db),
+                "--out", str(self.out), *options,
+            ],
+            capture_output=True, text=True, check=False,
+        )
+
+    def test_dashboard_renders_private_static_html(self) -> None:
+        before = self.db.read_bytes()
+        result = self.run_dashboard("--threshold-minutes", "15")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.db.read_bytes(), before)
+        content = self.out.read_text(encoding="utf-8")
+        self.assertIn("Session Health Dashboard", content)
+        self.assertIn("Content-Security-Policy", content)
+        self.assertIn("default-src 'none'", content)
+        self.assertIn("NO NETWORK", content)
+        self.assertIn("กำลังทำงาน", content)
+        self.assertIn("อาจค้าง", content)
+        self.assertIn("private file", result.stdout)
+        self.assertNotIn(str(self.db), content + result.stdout + result.stderr)
+        self.assertNotIn(str(self.out), content + result.stdout + result.stderr)
+        for secret in ("SECRET-PROMPT", "PRIVATE-PROMPT", "sk-test",
+                       "private@example.com", "PRIVATE EMAIL"):
+            self.assertNotIn(secret, content)
+        self.assertNotIn("<script", content.lower())
+        self.assertNotIn("src=", content.lower())
+        if sys.platform != "win32":
+            self.assertEqual(self.out.stat().st_mode & 0o077, 0)
+
+    def test_dashboard_refuses_to_overwrite_existing_report(self) -> None:
+        self.out.write_text("KEEP-ME", encoding="utf-8")
+        result = self.run_dashboard()
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.out.read_text(encoding="utf-8"), "KEEP-ME")
+        self.assertNotIn(str(self.out), result.stderr)
+
+    def test_dashboard_rejects_missing_input_without_creating_output(self) -> None:
+        self.db.unlink()
+        result = self.run_dashboard()
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(self.db.exists())
+        self.assertFalse(self.out.exists())
+
+    def test_dashboard_rejects_invalid_threshold_without_output(self) -> None:
+        result = self.run_dashboard("--threshold-minutes", "0")
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(self.out.exists())
+
+    def test_dashboard_rejects_non_html_output(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(self.dashboard), "--db", str(self.db),
+             "--out", str(self.db)],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertTrue(self.db.is_file())
+
+    def test_missing_progress_timestamp_does_not_claim_zero_stale(self) -> None:
+        conn = sqlite3.connect(self.db)
+        conn.execute("ALTER TABLE agent_sessions RENAME TO ignored_sessions")
+        conn.execute("CREATE TABLE agent_sessions (status TEXT)")
+        conn.execute("INSERT INTO agent_sessions VALUES ('running')")
+        conn.commit()
+        conn.close()
+        result = self.run_dashboard()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        html = self.out.read_text(encoding="utf-8")
+        self.assertIn("No last-progress field found", html)
+        self.assertIn('class="number">—</div>', html)
+
+    def test_missing_agent_sessions_table_is_reported_not_created(self) -> None:
+        conn = sqlite3.connect(self.db)
+        conn.execute("ALTER TABLE agent_sessions RENAME TO archived")
+        conn.commit()
+        conn.close()
+        before = self.db.read_bytes()
+        result = self.run_dashboard()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("schema compatibility not established",
+                      self.out.read_text(encoding="utf-8"))
+        self.assertEqual(self.db.read_bytes(), before)
+
+
 if __name__ == "__main__":
     unittest.main()

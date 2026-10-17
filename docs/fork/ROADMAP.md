@@ -20,7 +20,8 @@
 
 ## P1 — Reliability and security
 
-- [ ] Replace PID/write-and-read workspace auto-dream lock with a real cross-process atomic lock and race tests.
+- [x] Replace the production auto-dream acquisition path with a stable OS-level exclusive file lease, plus same-process 8-contender tests and portable rollback.
+- [ ] Add multi-process crash/kill/restart, Windows/macOS/Linux lock test evidence and split committed timestamp from in-progress state.
 - [ ] Add sandbox profiles for untrusted agent shell commands; separate read/write paths, environment secrets, network and process limits.
 - [ ] Introduce versioned, transactional SQLite migrations with verification and recovery procedures.
 - [ ] Classify transient vs permanent LLM reflection failures; TTL/backoff rather than permanent blacklist for transient errors.

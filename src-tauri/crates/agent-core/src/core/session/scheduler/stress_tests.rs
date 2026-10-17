@@ -232,8 +232,12 @@ async fn targeted_stop_is_session_local_across_five_busy_workers() {
             tokio::task::yield_now().await;
         }
     }).await.expect("unaffected sessions must finish");
+    // The cancelled job can still be waiting for its scheduler's receiver
+    // while other sessions complete. Wait for its dequeue without sleeping.
+    tokio::time::timeout(TEST_DEADLINE, async {
+        while schedulers.iter().any(|worker| worker.pending_count() != 0) {
+            tokio::task::yield_now().await;
+        }
+    }).await.expect("targeted cancelled job must drain its queue slot");
     assert_eq!(cancelled_ran.load(Ordering::SeqCst), 0);
-    for s in &schedulers {
-        assert_eq!(s.pending_count(), 0);
-    }
 }

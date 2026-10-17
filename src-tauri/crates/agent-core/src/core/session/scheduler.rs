@@ -652,7 +652,8 @@ impl WorkerTask {
             // The factory itself can panic before it returns a Future.
             // Place its invocation INSIDE the catch boundary so an otherwise
             // valid per-session worker cannot disappear with a live sender.
-            let result = std::panic::AssertUnwindSafe(async { (msg.execute)().await })
+            let execute = msg.execute;
+            let result = std::panic::AssertUnwindSafe(async move { execute().await })
                 .catch_unwind()
                 .await
                 .unwrap_or_else(|panic_payload| {

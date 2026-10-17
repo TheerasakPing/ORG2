@@ -10,6 +10,18 @@ use std::path::{Path, PathBuf};
 
 const PRIMARY_IDE_SERVER_PORT: u16 = 13_847;
 const PRIMARY_CLI_PROXY_PORT: u16 = 17_888;
+
+// Independent fork: keep all TCP defaults outside upstream's 13847..13946
+// and 17888..17987 instance ranges (including the reserved dev slot).
+const FORK_IDENTIFIER: &str = "com.theerasakping.tpagentstudio";
+const FORK_DEV_IDENTIFIER: &str = "com.theerasakping.tpagentstudio.dev";
+const FORK_IDE_SERVER_PORT: u16 = 23_847;
+const FORK_CLI_PROXY_PORT: u16 = 27_888;
+const FORK_INSTANCE_ID_BIAS: u16 = 1000;
+const FORK_INSTANCE_IDENTIFIER_PREFIXES: &[&str] = &[
+    "com.theerasakping.tpagentstudio.instance",
+    "com.theerasakping.tpagentstudio.e2e.instance",
+];
 // Dedicated dev slot, outside the numbered bundle range (2..=99).
 const DEV_INSTANCE_ID: u16 = 100;
 const INSTANCE_IDENTIFIER_PREFIXES: &[&str] = &["org2ai.org2.instance", "org2ai.org2.e2e.instance"];
@@ -22,7 +34,44 @@ pub(crate) struct RuntimeInstanceProfile {
 }
 
 impl RuntimeInstanceProfile {
+    pub(crate) fn is_fork(self) -> bool {
+        self.instance_id > FORK_INSTANCE_ID_BIAS
+    }
+
+    fn for_fork_instance(instance_id: u16) -> Self {
+        Self {
+            instance_id: FORK_INSTANCE_ID_BIAS + instance_id,
+            ide_server_port: FORK_IDE_SERVER_PORT + instance_id - 1,
+            cli_proxy_port: FORK_CLI_PROXY_PORT + instance_id - 1,
+        }
+    }
+
+    pub(crate) fn validate_explicit_home(self, user_home: &Path, configured: &Path) -> Result<(), &'static str> {
+        if !self.is_fork() {
+            return Ok(());
+        }
+        if !configured.is_absolute() || configured.as_os_str().is_empty() {
+            return Err("Fork data root must be an absolute path");
+        }
+        let upstream = user_home.join(".orgii");
+        let configured_real = configured.canonicalize().unwrap_or_else(|_| configured.to_path_buf());
+        let upstream_real = upstream.canonicalize().unwrap_or(upstream);
+        if configured_real == upstream_real {
+            return Err("Fork data root must not point to the upstream ORG2 profile");
+        }
+        Ok(())
+    }
+
     pub(crate) fn from_identifier(identifier: &str) -> Self {
+        if identifier == FORK_IDENTIFIER {
+            return Self::for_fork_instance(1);
+        }
+        if identifier == FORK_DEV_IDENTIFIER {
+            return Self::for_fork_instance(DEV_INSTANCE_ID);
+        }
+        if let Some(instance_id) = parse_fork_instance_id(identifier) {
+            return Self::for_fork_instance(instance_id);
+        }
         let instance_id = if identifier == "org2ai.org2.dev" {
             DEV_INSTANCE_ID
         } else {
@@ -39,6 +88,15 @@ impl RuntimeInstanceProfile {
     /// Primary and dev intentionally share `~/.orgii`, including sessions.db
     /// and its attachments/replays, by returning `None`.
     pub(crate) fn default_orgii_home(self, user_home: &Path) -> Option<PathBuf> {
+        if self.is_fork() {
+            let slot = self.instance_id - FORK_INSTANCE_ID_BIAS;
+            let folder = match slot {
+                1 => ".tp-agent-studio".to_string(),
+                DEV_INSTANCE_ID => ".tp-agent-studio-dev".to_string(),
+                id => format!(".tp-agent-studio-instance{id}"),
+            };
+            return Some(user_home.join(folder));
+        }
         if self.instance_id == DEV_INSTANCE_ID {
             return None;
         }
@@ -52,9 +110,18 @@ impl RuntimeInstanceProfile {
         self,
         resolved_orgii_home: &Path,
     ) -> Option<PathBuf> {
-        (self.instance_id > 1 && self.instance_id != DEV_INSTANCE_ID)
+        (self.is_fork() || (self.instance_id > 1 && self.instance_id != DEV_INSTANCE_ID))
             .then(|| resolved_orgii_home.join("external-history-home"))
     }
+}
+
+fn parse_fork_instance_id(identifier: &str) -> Option<u16> {
+    FORK_INSTANCE_IDENTIFIER_PREFIXES
+        .iter()
+        .find_map(|prefix| identifier.strip_prefix(prefix))?
+        .parse::<u16>()
+        .ok()
+        .filter(|id| (2..=99).contains(id))
 }
 
 fn parse_instance_id(identifier: &str) -> Option<u16> {
@@ -69,6 +136,42 @@ fn parse_instance_id(identifier: &str) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn independent_fork_uses_distinct_ports_and_profiles() {
+        let upstream = RuntimeInstanceProfile::from_identifier("org2ai.org2");
+        let fork = RuntimeInstanceProfile::from_identifier(FORK_IDENTIFIER);
+        let fork_dev = RuntimeInstanceProfile::from_identifier(FORK_DEV_IDENTIFIER);
+        assert!(fork.is_fork());
+        assert!(fork_dev.is_fork());
+        assert_ne!(fork.ide_server_port, upstream.ide_server_port);
+        assert_ne!(fork.cli_proxy_port, upstream.cli_proxy_port);
+        assert_eq!(fork.ide_server_port, 23_847);
+        assert_eq!(fork.cli_proxy_port, 27_888);
+        assert_eq!(fork.default_orgii_home(Path::new("/home/test")), Some(PathBuf::from("/home/test/.tp-agent-studio")));
+        assert_eq!(fork_dev.default_orgii_home(Path::new("/home/test")), Some(PathBuf::from("/home/test/.tp-agent-studio-dev")));
+        assert_ne!(fork.ide_server_port, fork_dev.ide_server_port);
+        assert_eq!(fork.default_external_history_home(Path::new("/home/test/.tp-agent-studio")), Some(PathBuf::from("/home/test/.tp-agent-studio/external-history-home")));
+        assert!(fork.validate_explicit_home(Path::new("/home/test"), Path::new("/home/test/.orgii")).is_err());
+        assert!(fork.validate_explicit_home(Path::new("/home/test"), Path::new("relative")).is_err());
+        assert!(fork.validate_explicit_home(Path::new("/home/test"), Path::new("/tmp/tp-agent-studio-e2e")).is_ok());
+    }
+
+    #[test]
+    fn fork_numbered_instances_preserve_separate_profiles() {
+        let primary = RuntimeInstanceProfile::from_identifier(FORK_IDENTIFIER);
+        for id in 2..=99 {
+            let identifier = format!("com.theerasakping.tpagentstudio.instance{id}");
+            let other = RuntimeInstanceProfile::from_identifier(&identifier);
+            assert!(other.is_fork());
+            assert_ne!(other.ide_server_port, primary.ide_server_port);
+            assert_ne!(other.cli_proxy_port, primary.cli_proxy_port);
+            assert!(other.default_orgii_home(Path::new("/home/test")).unwrap().to_string_lossy().contains("tp-agent-studio-instance"));
+        }
+        let webdriver = RuntimeInstanceProfile::from_identifier("com.theerasakping.tpagentstudio.e2e.instance2");
+        assert_eq!(webdriver.ide_server_port, 23_848);
+        assert_eq!(webdriver.cli_proxy_port, 27_889);
+    }
 
     #[test]
     fn dev_identifier_shares_primary_data_with_separate_service_defaults() {

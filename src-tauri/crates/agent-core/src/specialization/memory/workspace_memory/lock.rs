@@ -318,24 +318,22 @@ mod tests {
     #[test]
     fn test_acquire_fresh() {
         let tmp = TempDir::new().unwrap();
-        let result = try_acquire(tmp.path());
-        assert!(result.is_ok());
-        let prior = result.unwrap();
-        assert_eq!(prior, Some(0)); // No prior lock
+        let lease = try_acquire_lease(tmp.path()).unwrap();
+        assert!(lease.is_some());
+        assert!(read_last_consolidated_at(tmp.path()) > 0);
+        drop(lease);
+        assert_eq!(read_last_consolidated_at(tmp.path()), 0);
     }
 
     #[test]
     fn test_acquire_blocks_when_live() {
         let tmp = TempDir::new().unwrap();
-
-        // First acquire
-        let r1 = try_acquire(tmp.path()).unwrap();
-        assert!(r1.is_some());
-
-        // Second acquire from same process is blocked because the lock is
-        // fresh and our PID is live.
-        let r2 = try_acquire(tmp.path()).unwrap();
-        assert!(r2.is_none(), "should be blocked by live holder");
+        let first = try_acquire_lease(tmp.path()).unwrap().unwrap();
+        // OS advisory locking must also block within a single process,
+        // where both contenders have the same PID; this works on Windows.
+        let second = try_acquire_lease(tmp.path()).unwrap();
+        assert!(second.is_none(), "should be blocked by OS lock holder");
+        drop(first);
     }
 
     #[test]

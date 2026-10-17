@@ -21,6 +21,12 @@ assert.match(rust, /const FORK_UPDATER_READY:\s*bool\s*=\s*false\s*;/,
 assert.match(rust, /pub async fn check_app_update\([\s\S]*?require_fork_updater_ready\(\)\?;/,
   'Custom check_app_update path must enforce fork update guard');
 assert.match(readme, /Independent community fork/);
+assert.deepEqual(config.plugins?.updater?.endpoints, [],
+  'Until independent signing is configured, no updater manifest URL may be active');
+assert.doesNotMatch(readme, /github\\.com\\/org2AI\\/ORG2\\/releases\\//i,
+  'Fork README must not offer binaries published by the original upstream');
+assert.match(readme, /No independently signed TP Agent Studio installers are available yet/);
+
 const upstreamRelease = read('.github/workflows/release.yaml');
 const releaseLines = upstreamRelease.split('\n');
 for (const job of ['build-and-release', 'build-windows', 'build-linux']) {

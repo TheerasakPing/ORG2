@@ -241,3 +241,140 @@ async fn targeted_stop_is_session_local_across_five_busy_workers() {
     }).await.expect("targeted cancelled job must drain its queue slot");
     assert_eq!(cancelled_ran.load(Ordering::SeqCst), 0);
 }
+
+
+/// The worker for one session can be aborted without blocking an unrelated
+/// per-session FIFO. Replacement only happens on a *new enqueue* and never
+/// replays the old pending job from the lost receiver.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn dead_worker_replacement_does_not_replay_or_block_neighbor() {
+    let dead = DialogScheduler::new("stress-lab-dead", 4);
+    let neighbor = DialogScheduler::new("stress-lab-neighbor", 4);
+    let (dead_started_tx, dead_started_rx) = tokio::sync::oneshot::channel();
+    let (_dead_release_tx, dead_release_rx) = tokio::sync::oneshot::channel::<()>();
+    let stale_ran = Arc::new(AtomicUsize::new(0));
+    let recovered_ran = Arc::new(AtomicUsize::new(0));
+    let neighbor_ran = Arc::new(AtomicUsize::new(0));
+
+    dead.enqueue(synthetic_message(
+        "dead-running".into(), ScheduledKind::Maintenance,
+        Box::new(move || Box::pin(async move {
+            let _ = dead_started_tx.send(());
+            let _ = dead_release_rx.await;
+            Ok(ExecutionCompletion::Finished)
+        })),
+    )).await.expect("enqueue blocked worker");
+    tokio::time::timeout(TEST_DEADLINE, dead_started_rx)
+        .await.expect("dead worker starts")
+        .expect("start signal");
+
+    let stale_count = Arc::clone(&stale_ran);
+    dead.enqueue(synthetic_message(
+        "never-replay".into(), ScheduledKind::Maintenance,
+        Box::new(move || Box::pin(async move {
+            stale_count.fetch_add(1, Ordering::SeqCst);
+            Ok(ExecutionCompletion::Finished)
+        })),
+    )).await.expect("enqueue old pending job");
+
+    let (neighbor_release, neighbor_hold) = tokio::sync::oneshot::channel::<()>();
+    let (neighbor_started_tx, neighbor_started_rx) = tokio::sync::oneshot::channel();
+    let neighbor_count = Arc::clone(&neighbor_ran);
+    neighbor.enqueue(synthetic_message(
+        "neighbor".into(), ScheduledKind::Maintenance,
+        Box::new(move || Box::pin(async move {
+            let _ = neighbor_started_tx.send(());
+            let _ = neighbor_hold.await;
+            neighbor_count.fetch_add(1, Ordering::SeqCst);
+            Ok(ExecutionCompletion::Finished)
+        })),
+    )).await.expect("neighbor starts");
+    tokio::time::timeout(TEST_DEADLINE, neighbor_started_rx)
+        .await.expect("neighbor is independently active")
+        .expect("neighbor start signal");
+
+    {
+        let guard = dead.inner.lock().await;
+        guard.as_ref().expect("dead worker registered").worker.abort();
+    }
+    tokio::time::timeout(TEST_DEADLINE, async {
+        loop {
+            let finished = dead.inner.lock().await
+                .as_ref().expect("dead handle retained").worker.is_finished();
+            if finished { break; }
+            tokio::task::yield_now().await;
+        }
+    }).await.expect("aborted worker must stop");
+
+    let recovered_count = Arc::clone(&recovered_ran);
+    dead.enqueue(synthetic_message(
+        "new-work-not-replay".into(), ScheduledKind::Maintenance,
+        Box::new(move || Box::pin(async move {
+            recovered_count.fetch_add(1, Ordering::SeqCst);
+            Ok(ExecutionCompletion::Finished)
+        })),
+    )).await.expect("a new enqueue must replace terminated worker");
+
+    neighbor_release.send(()).expect("neighbor is still waiting");
+    tokio::time::timeout(TEST_DEADLINE, async {
+        while recovered_ran.load(Ordering::SeqCst) != 1 ||
+            neighbor_ran.load(Ordering::SeqCst) != 1 {
+            tokio::task::yield_now().await;
+        }
+    }).await.expect("new local job and neighbor job both finish");
+
+    assert_eq!(stale_ran.load(Ordering::SeqCst), 0,
+        "lost queue contents must never be replayed as side-effectful work");
+    assert_eq!(dead.pending_count(), 0);
+    assert_eq!(neighbor.pending_count(), 0);
+}
+
+/// Queue admission must reject excess work promptly rather than retaining
+/// unlimited messages that make an app with many sessions appear hung.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn bounded_per_session_queue_rejects_overload_and_drains_cleanly() {
+    let scheduler = DialogScheduler::new("stress-lab-queue-cap", 2);
+    let (first_started_tx, first_started_rx) = tokio::sync::oneshot::channel();
+    let (release, hold) = tokio::sync::oneshot::channel::<()>();
+    let finished = Arc::new(AtomicUsize::new(0));
+    let initial_finished = Arc::clone(&finished);
+
+    scheduler.enqueue(synthetic_message(
+        "blocking-first".into(), ScheduledKind::Maintenance,
+        Box::new(move || Box::pin(async move {
+            let _ = first_started_tx.send(());
+            let _ = hold.await;
+            initial_finished.fetch_add(1, Ordering::SeqCst);
+            Ok(ExecutionCompletion::Finished)
+        })),
+    )).await.expect("first maintenance job enqueued");
+    tokio::time::timeout(TEST_DEADLINE, first_started_rx)
+        .await.expect("first job reaches its wait point")
+        .expect("first start signal");
+
+    for index in 0..2 {
+        let count = Arc::clone(&finished);
+        scheduler.enqueue(synthetic_message(
+            format!("queued-{index}"), ScheduledKind::Maintenance,
+            Box::new(move || Box::pin(async move {
+                count.fetch_add(1, Ordering::SeqCst);
+                Ok(ExecutionCompletion::Finished)
+            })),
+        )).await.expect("up to capacity pending jobs admitted");
+    }
+    assert_eq!(scheduler.pending_count(), 2);
+    let rejected = scheduler.enqueue(synthetic_message(
+        "over-capacity".into(), ScheduledKind::Maintenance,
+        Box::new(|| Box::pin(async { Ok(ExecutionCompletion::Finished) })),
+    )).await.expect_err("the full per-session queue must reject immediately");
+    assert!(rejected.contains("full"), "unexpected rejection: {rejected}");
+    assert_eq!(scheduler.pending_count(), 2);
+
+    release.send(()).expect("first job is still blocked");
+    tokio::time::timeout(TEST_DEADLINE, async {
+        while finished.load(Ordering::SeqCst) != 3 {
+            tokio::task::yield_now().await;
+        }
+    }).await.expect("accepted queue drains after releasing the first job");
+    assert_eq!(scheduler.pending_count(), 0);
+}

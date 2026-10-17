@@ -13,6 +13,7 @@ import {
   deriveLiveSessionSummary,
   type LiveSessionRow,
 } from "./liveSessionMonitorModel";
+import { NativeWorkerOverviewSection } from "./NativeWorkerOverviewSection";
 import { countQuietSessions, phaseAdvisory } from "./sessionStallAdvisory";
 import {
   countSchedulerPulseHealth,
@@ -224,6 +225,7 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
         )}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <NativeWorkerOverviewSection />
         <p className="mb-3 text-[11px] text-text-3">
           แสดง {summary.visibleCount} จาก {summary.totalLoaded} Session ในรายการที่โหลดแล้ว
           {summary.truncated ? " (จำกัดสูงสุด 50 รายการ)" : ""}

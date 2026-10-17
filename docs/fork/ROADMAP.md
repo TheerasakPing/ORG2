@@ -13,6 +13,7 @@
 - [x] Move the canonical application data root and runtime-default ports to fork-specific paths; external history and native transcript defaults are isolated. Remaining hard-coded legacy paths, runtime hooks and installer coexistence still require an end-to-end audit.
 - [x] Disable base updater and custom Rust upstream update route for unreleased fork.
 - [ ] Replace update URLs, public signing key, CI release dependencies and signing identities with fork-owned infrastructure.
+- [x] Harden the explicit fork data-root guard against parent traversal, missing suffixes and symlinked ancestors; add focused Rust and fork-safety tests.
 - [ ] Run same-machine concurrent-install and migration/rollback tests.
 - [ ] Publish fork-built packages only after independent signing and end-to-end smoke tests.
 

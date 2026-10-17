@@ -1,0 +1,101 @@
+# Fork-only, unsigned experimental installers. Does not publish GitHub Releases.
+# Never enables the inherited upstream updater or upstream signing credentials.
+name: TP Agent Studio Preview Installers
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - integration/tp-agent-studio-develop
+    paths:
+      - .github/workflows/preview-installers.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tp-preview-installers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-preview:
+    name: Preview ${{ matrix.name }}
+    if: github.repository == 'TheerasakPing/ORG2'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple Silicon
+            runner: macos-15
+            target: aarch64-apple-darwin
+            bundle: dmg
+            artifact: TP-Agent-Studio-preview-macOS-Apple-Silicon
+            path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          - name: Windows x64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            bundle: nsis
+            artifact: TP-Agent-Studio-preview-Windows-x64
+            path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          - name: Linux x64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            bundle: deb
+            artifact: TP-Agent-Studio-preview-Linux-x64
+            path: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      CARGO_INCREMENTAL: "0"
+      NODE_OPTIONS: --max-old-space-size=4096
+      ORGII_BUILD_KIND: preview
+      ORGII_BUILD_SHA: ${{ github.sha }}
+      ORGII_BUILD_REF: ${{ github.ref_name }}
+    steps:
+      - name: Checkout exact tested branch
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Linux Tauri system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev librsvg2-dev \
+            libayatana-appindicator3-dev libasound2-dev patchelf
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+      - name: Setup Node 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: tp-preview-${{ matrix.target }}
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify fork identity and updater stay isolated
+        run: |
+          node scripts/fork/check-safety.mjs
+          node scripts/fork/check-identity.mjs
+          node scripts/fork/check-icons.mjs
+      - name: Build unsigned, fork-identity preview
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
+        run: pnpm tauri:build --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
+      - name: Upload preview installer (not an official signed release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.path }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

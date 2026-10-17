@@ -5,6 +5,7 @@ import {
   ingestNativePhase,
   MAX_NATIVE_PHASE_RECORDS,
   nativePhaseDescription,
+  type NativePhaseMap,
 } from "./nativePhaseEvents";
 
 const provider = (sessionId: string, turnId = "turn-1") => ({
@@ -86,9 +87,9 @@ describe("native Rust session phase events", () => {
   });
 
   it("caps tracked observations at 128 independently owned session rows", () => {
-    let map = new Map();
+    let map: NativePhaseMap = new Map();
     for (let i = 0; i < MAX_NATIVE_PHASE_RECORDS + 15; i++) {
-      map = new Map(ingestNativePhase(map, provider("session-" + i), i));
+      map = ingestNativePhase(map, provider("session-" + i), i);
     }
     expect(map.size).toBe(MAX_NATIVE_PHASE_RECORDS);
     expect(map.has("session-0")).toBe(false);

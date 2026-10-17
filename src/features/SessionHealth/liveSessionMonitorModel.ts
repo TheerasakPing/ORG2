@@ -6,21 +6,34 @@ import type { AgentLiveStatus } from "@src/api/tauri/rpc/schemas/agentOrgs";
 import type { Session } from "@src/store/session/sessionAtom/types";
 
 const BUSY_STATUSES = new Set([
-  "running", "in_progress", "installing", "pending", "queued",
+  "running",
+  "in_progress",
+  "installing",
+  "pending",
+  "queued",
   "waiting_for_funds",
 ]);
-const ATTENTION_STATUSES = new Set([
-  "waiting_for_user", "paused",
-]);
+const ATTENTION_STATUSES = new Set(["waiting_for_user", "paused"]);
 const TERMINAL_STATUSES = new Set([
-  "completed", "failed", "error", "cancelled",
-  "abandoned", "timeout", "killed", "archived",
+  "completed",
+  "failed",
+  "error",
+  "cancelled",
+  "abandoned",
+  "timeout",
+  "killed",
+  "archived",
 ]);
 
 export const MAX_LIVE_MONITOR_ROWS = 50;
 export const PERSISTED_STATUS_AGE_WARNING_MS = 10 * 60 * 1000;
 
-export type MonitorPhase = "working" | "attention" | "idle" | "terminal" | "unknown";
+export type MonitorPhase =
+  | "working"
+  | "attention"
+  | "idle"
+  | "terminal"
+  | "unknown";
 
 export interface LiveSessionRow {
   id: string;
@@ -71,7 +84,10 @@ export function deriveLiveSessionSummary(
 ): LiveSessionSummary {
   const nowMs = options.nowMs ?? Date.now();
   const activeOnly = options.activeOnly ?? true;
-  const limit = Math.max(1, Math.min(MAX_LIVE_MONITOR_ROWS, options.maxRows ?? MAX_LIVE_MONITOR_ROWS));
+  const limit = Math.max(
+    1,
+    Math.min(MAX_LIVE_MONITOR_ROWS, options.maxRows ?? MAX_LIVE_MONITOR_ROWS)
+  );
   let busy = 0;
   let attention = 0;
   let olderStatus = 0;
@@ -98,7 +114,8 @@ export function deriveLiveSessionSummary(
       nowMs - updatedAtMs >= PERSISTED_STATUS_AGE_WARNING_MS;
     if (oldPersistedStatus) olderStatus++;
 
-    const tool = hook?.status === "running" ? safeToolName(hook.toolName) : null;
+    const tool =
+      hook?.status === "running" ? safeToolName(hook.toolName) : null;
     const detail = hook
       ? hook.status === "waiting_for_user"
         ? "CLI hook: waiting for user"
@@ -109,7 +126,12 @@ export function deriveLiveSessionSummary(
 
     rows.push({
       id: session.session_id,
-      title: (session.displayLabel || session.name || session.agentDisplayName || "Untitled session").slice(0, 90),
+      title: (
+        session.displayLabel ||
+        session.name ||
+        session.agentDisplayName ||
+        "Untitled session"
+      ).slice(0, 90),
       status,
       phase,
       detail,
@@ -121,12 +143,17 @@ export function deriveLiveSessionSummary(
 
   const totalLoaded = rows.length;
   const priority: Record<MonitorPhase, number> = {
-    working: 0, attention: 1, idle: 2, unknown: 3, terminal: 4,
+    working: 0,
+    attention: 1,
+    idle: 2,
+    unknown: 3,
+    terminal: 4,
   };
-  rows.sort((a, b) =>
-    priority[a.phase] - priority[b.phase] ||
-    (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0) ||
-    a.id.localeCompare(b.id)
+  rows.sort(
+    (a, b) =>
+      priority[a.phase] - priority[b.phase] ||
+      (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0) ||
+      a.id.localeCompare(b.id)
   );
   return {
     rows: rows.slice(0, limit),

@@ -56,8 +56,13 @@ function Breakdown({ overview }: { overview: NativeWorkerOverview | null }) {
   );
 }
 
-export function NativeWorkerOverviewSection(): React.ReactElement {
-  const { overview, isLoading, error, refresh } = useNativeWorkerOverview();
+export function NativeWorkerOverviewSection({
+  refreshSignal = 0,
+}: {
+  refreshSignal?: number;
+}): React.ReactElement {
+  const { overview, isLoading, error, refresh } =
+    useNativeWorkerOverview(refreshSignal);
 
   return (
     <section

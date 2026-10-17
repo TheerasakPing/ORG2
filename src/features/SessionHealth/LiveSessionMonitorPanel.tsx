@@ -133,6 +133,7 @@ export default function LiveSessionMonitorPanel({
   const [nowMs, setNowMs] = useState(Date.now);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
+  const [workerRefreshSignal, setWorkerRefreshSignal] = useState(0);
   const [nativePhases, setNativePhases] = useState<NativePhaseMap>(
     () => new Map()
   );
@@ -204,6 +205,7 @@ export default function LiveSessionMonitorPanel({
     if (refreshing) return;
     setRefreshing(true);
     setRefreshError(false);
+    setWorkerRefreshSignal((previous) => previous + 1);
     try {
       // Explicit only: joined with the app's single-flight roster loader.
       await loadSessionRoster({ forceRefresh: true });
@@ -303,7 +305,7 @@ export default function LiveSessionMonitorPanel({
         )}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <NativeWorkerOverviewSection />
+        <NativeWorkerOverviewSection refreshSignal={workerRefreshSignal} />
         <p className="mb-3 text-[11px] text-text-3">
           แสดง {summary.visibleCount} จาก {summary.totalLoaded} Session
           ในรายการที่โหลดแล้ว

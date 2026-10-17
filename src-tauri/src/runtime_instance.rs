@@ -262,9 +262,10 @@ mod tests {
         assert_eq!(fork_dev.default_orgii_home(Path::new("/home/test")), Some(PathBuf::from("/home/test/.tp-agent-studio-dev")));
         assert_ne!(fork.ide_server_port, fork_dev.ide_server_port);
         assert_eq!(fork.default_external_history_home(Path::new("/home/test/.tp-agent-studio")), Some(PathBuf::from("/home/test/.tp-agent-studio/external-history-home")));
-        assert!(fork.validate_explicit_home(Path::new("/home/test"), Path::new("/home/test/.orgii")).is_err());
-        assert!(fork.validate_explicit_home(Path::new("/home/test"), Path::new("relative")).is_err());
-        assert!(fork.validate_explicit_home(Path::new("/home/test"), Path::new("/tmp/tp-agent-studio-e2e")).is_ok());
+        let temp_home = tempfile::tempdir().unwrap();
+        assert!(fork.validate_explicit_home(temp_home.path(), &temp_home.path().join(".orgii")).is_err());
+        assert!(fork.validate_explicit_home(temp_home.path(), Path::new("relative")).is_err());
+        assert!(fork.validate_explicit_home(temp_home.path(), &temp_home.path().join(".tp-agent-studio-e2e")).is_ok());
     }
 
     #[test]

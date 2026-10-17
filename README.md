@@ -1,7 +1,7 @@
 > **Independent community fork — TheerasakPing/ORG2**
 >
 > This repository is a fork of [org2AI/ORG2](https://github.com/org2AI/ORG2).
-> Work-in-progress app identity: **TP Agent Studio** (provisional branding; ORGII remains in internal APIs and compatibility code).
+> Work-in-progress app identity: **TP Agent Studio** (provisional branding; legacy compatibility names remain in internal APIs).
 >
 > ![TP Agent Studio two-tone icon](assets/branding/tp-agent-studio.svg)
 >

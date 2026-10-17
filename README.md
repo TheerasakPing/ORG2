@@ -54,6 +54,22 @@ It is not just another AI coding tool; it is an experiment in human/agent organi
 และ **ยังไม่ควรใช้งานกับบัญชี Cloud จริงหรือข้อมูลที่สำคัญ** จนกว่าการแยกบริการ
 OAuth/Cloud และทดสอบการย้ายข้อมูลจะเสร็จสมบูรณ์
 
+### Live Session Monitor & Worker Overview (stacked PRs)
+
+The fork is developing a **read-only** diagnostic panel for multi-session
+Agent Harness reliability. [Live Session Monitor](docs/fork/LIVE_SESSION_MONITOR.md)
+combines Rust provider/tool transition events, scheduler polling heartbeats,
+and a native **Worker Overview** of actual in-memory `DialogScheduler`
+tasks: workers created, live/busy/idle/terminated, maintenance, unstarted
+sessions and pending queue counts. Each native Session can lazily create
+one Tokio Worker; registered Session count is **not** the number of Workers.
+
+The Worker Overview reads aggregate counts only and does **not** include
+external CLI processes, cloud agents, OS threads or subagent job pools.
+Heartbeat silence is advisory: there is **no automatic replay, abort,
+restart or proof of model/tool liveness**. These stacked PRs are not merged,
+not production-tested across macOS/Windows/Linux and not an installer release.
+
 ### Recent work (integration PR #9)
 
 | Area | Implemented in the PR branch | Remaining verification |

@@ -327,6 +327,21 @@ pub struct EnqueueResult {
     pub duplicate: bool,
 }
 
+/// Read-only, ephemeral snapshot of one session-owned Scheduler.
+#[derive(Debug, Clone, Copy)]
+pub struct SchedulerWorkerSnapshot {
+    /// The scheduler has started a worker task at least once in this lifetime.
+    pub initialized: bool,
+    /// Tokio join handle or receiver indicates the worker is no longer live.
+    pub terminated: bool,
+    /// Any job, including maintenance, is currently being processed.
+    pub busy: bool,
+    /// Whether the active job is a user-facing Turn (not maintenance).
+    pub turn_processing: bool,
+    /// Approximate number of queued jobs, excluding the current job.
+    pub pending: usize,
+}
+
 // ============================================
 // DialogScheduler
 // ============================================
@@ -627,6 +642,24 @@ impl DialogScheduler {
         self.turn_control.lock().cancelled.contains(turn_intent_id)
     }
 
+    /// Snapshot the in-memory Worker state without creating a worker, queue,
+    /// data source or performing any database I/O. The status is best effort
+    /// while a concurrent enqueue/dequeue may advance between atomics.
+    pub async fn worker_snapshot(&self) -> SchedulerWorkerSnapshot {
+        let worker = self.inner.lock().await;
+        let initialized = worker.is_some();
+        let terminated = worker.as_ref().is_some_and(|entry| {
+            entry.worker.is_finished() || entry.tx.is_closed()
+        });
+        SchedulerWorkerSnapshot {
+            initialized,
+            terminated,
+            busy: self.is_processing(),
+            turn_processing: self.is_turn_processing(),
+            pending: self.pending_count(),
+        }
+    }
+
     /// Whether the worker is currently executing a job of any kind.
     ///
     /// This is "the worker is busy" — it includes maintenance jobs. Callers
@@ -655,6 +688,37 @@ impl DialogScheduler {
             "agent:queue_status",
             serde_json::to_value(self.status()).expect("QueueStatus serialization is infallible"),
         );
+    }
+}
+
+#[cfg(test)]
+mod worker_snapshot_tests {
+    use super::DialogScheduler;
+
+    #[tokio::test]
+    async fn snapshot_does_not_spawn_uninitialized_worker() {
+        let scheduler = DialogScheduler::new("snapshot-lazy", 4);
+        let observation = scheduler.worker_snapshot().await;
+        assert!(!observation.initialized);
+        assert!(!observation.terminated);
+        assert!(!observation.busy);
+        assert!(!observation.turn_processing);
+        assert_eq!(observation.pending, 0);
+        // Merely reading state should not create an inner handle.
+        assert!(scheduler.inner.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn snapshot_distinguishes_spawned_idle_from_unstarted_worker() {
+        let scheduler = DialogScheduler::new("snapshot-idle", 4);
+        let tx = scheduler.ensure_initialized().await;
+        let observation = scheduler.worker_snapshot().await;
+        assert!(observation.initialized);
+        assert!(!observation.terminated);
+        assert!(!observation.busy);
+        assert!(!observation.turn_processing);
+        assert_eq!(observation.pending, 0);
+        drop(tx);
     }
 }
 

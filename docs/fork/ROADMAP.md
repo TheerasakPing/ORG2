@@ -8,6 +8,7 @@
 ## P0 — Safe ownership and packaging (must pass before installers)
 
 - [ ] Select a final brand and domain; inventory ORG2 trademarks and upstream-only UI links.
+- [x] Introduce original two-tone TP Agent Studio icons for desktop bundle, Dev and default live Dock; remaining tray, Store/mobile and legacy optional Dock variants need rebranding and platform validation.
 - [x] Add provisional TP Agent Studio Tauri names/identifiers for main, dev and Windows; installer coexistence requires runtime acceptance tests.
 - [x] Move the canonical application data root and runtime-default ports to fork-specific paths; external history and native transcript defaults are isolated. Remaining hard-coded legacy paths, runtime hooks and installer coexistence still require an end-to-end audit.
 - [x] Disable base updater and custom Rust upstream update route for unreleased fork.

@@ -20,7 +20,7 @@ describe("native Rust session phase events", () => {
     expect(map.get("session-A")).toEqual({
       turnId: "turn-1", phase: "provider_request", tool: null, observedAtMs: 1000,
     });
-    expect(nativePhaseDescription("provider_request", null)).toContain("not");
+    expect(nativePhaseDescription("provider_request", null)).toContain("heartbeat");
     expect(map.size).toBe(1);
   });
 

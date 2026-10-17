@@ -23,7 +23,7 @@ assert.match(rust, /pub async fn check_app_update\([\s\S]*?require_fork_updater_
 assert.match(readme, /Independent community fork/);
 assert.deepEqual(config.plugins?.updater?.endpoints, [],
   'Until independent signing is configured, no updater manifest URL may be active');
-assert.doesNotMatch(readme, /github\\.com\\/org2AI\\/ORG2\\/releases\\//i,
+assert.ok(!readme.includes('https://github.com/org2AI/ORG2/releases/'),
   'Fork README must not offer binaries published by the original upstream');
 assert.match(readme, /No independently signed TP Agent Studio installers are available yet/);
 

@@ -107,6 +107,26 @@ a slow model, blocked network, paused OS, or a hung future; the Monitor
 must not claim to have determined which. The panel also cannot reconstruct
 the phase of an already-running turn if it was opened after the transition.
 
+## V3 — passive phase-silence advisories (stacked PR)
+
+While the panel is **open**, each observed native turn receives a local,
+ephemeral timestamp. Silence of >=5 minutes is labelled **quiet**; >=60
+minutes is **old observation**. Neither indicator is a heartbeat or
+proof of a hung worker. A healthy long-running inference/tool and a
+blocked worker can both be silent. Sessions not observed by this monitor
+are **unknown**, never treated as healthy or failed.
+
+The quiet summary intentionally scopes to the displayed maximum 50
+loaded, working, native-phase rows, not the entire installed database
+or cloud history. No background intervals, logs, restarts, cancel
+requests, database edits or network calls are introduced. The same
+30-second in-panel display timer updates these cautions; closing the
+panel discards every observation and notification.
+
+V3 remains diagnostics-only: backend watchdogs, monotonic heartbeat
+semantics and timeout classification require separate Rust work and
+fault-injection tests on actual providers/tools.
+
 **Next phases** (not included in v1):
 1. Rust-native **session-scoped** provider/tool periodic heartbeat, with a
    monotonic per-turn generation and a bounded event schema that never

@@ -127,6 +127,49 @@ V3 remains diagnostics-only: backend watchdogs, monotonic heartbeat
 semantics and timeout classification require separate Rust work and
 fault-injection tests on actual providers/tools.
 
+## V4 — Scheduler worker polling heartbeat (stacked PR)
+
+The Rust per-session `DialogScheduler` now sends a **content-free**
+`agent:scheduler_heartbeat` signal from *inside the same Tokio worker task*
+that polls the active Turn future, every **15 seconds** while that Turn is
+running. The first tick is eligible immediately after the callback future
+begins being awaited. Maintenance jobs do not emit this signal.
+
+Payload fields are limited to `sessionId`, `turnIntentId`, a monotonically
+increasing **per-claimed-turn epoch**, a monotonically increasing tick
+`sequence`, and `state: alive | finished`. No prompt, tool argument,
+provider endpoint, command output, or credentials are attached.
+
+The panel listens only while open and stores up to **128** records. The
+`finished` state is retained as a short-lived **epoch tombstone** to reject
+late heartbeats from a completed Turn, rather than falsely showing a worker
+alive. Out-of-order epochs and duplicate tick sequences cannot refresh the
+observed-time clock. Closing the panel discards all observations.
+
+For native sessions currently marked working, the panel shows:
+- **Recent:** worker tick seen within 45 seconds.
+- **Late:** no new worker tick for at least 45 seconds.
+- **Missing:** no new worker tick for at least 2 minutes.
+- **Unobserved:** panel did not see a heartbeat, the Turn finished, or
+  timing is invalid. **Not evidence of failure.**
+
+The 30-second UI display timer already used by the open Monitor updates
+these age categories; no additional polling/IPC requests are introduced.
+The Rust heartbeat's timer runs only **while a Turn future is pending**,
+and is dropped when the Turn ends or its owning Worker task is aborted.
+It never touches the durable queue, session store, provider, or tools.
+
+**Crucial semantics:** This detects whether the **Tokio Scheduler task
+continued getting polled**, NOT whether the LLM made progress or a tool
+finished. Healthy long model calls and blocked provider futures can still
+produce on-time scheduler ticks. A suspended laptop, overloaded event loop,
+window hidden, or IPC delivery loss can delay observed ticks. No automatic
+kill/retry/replay/restart action is permitted from these indicators.
+
+The existing dead-Worker replacement on **next enqueue** remains as-is.
+This PR does not add proactive worker recovery and does not certify
+a recovered native turn across app restart.
+
 **Next phases** (not included in v1):
 1. Rust-native **session-scoped** provider/tool periodic heartbeat, with a
    monotonic per-turn generation and a bounded event schema that never

@@ -6,7 +6,7 @@
 > ![TP Agent Studio two-tone icon](assets/branding/tp-agent-studio.svg)
 >
 > Two-tone desktop branding details: [branding guide](docs/fork/TWO_TONE_BRANDING.md).
-> The download links below still point to the **upstream publisher**, not builds from this fork.
+> This fork does **not** distribute the upstream publisher's installers.
 > The fork's application updater is intentionally disabled pending independent signing and release infrastructure.
 > **Do not install experimental fork builds alongside upstream ORG2** until the app identity,
 > deep links and `~/.orgii` state/storage are isolated and migration-tested.
@@ -15,26 +15,13 @@
 ---
 
 <div align="center">
-  <h1>ORG-2</h1>
+  <h1>TP Agent Studio</h1>
   <p><strong>The system of record for how agents build software.<br />Run your coding agents — replay any session, review as a team, and trace every line back to the decision behind it.</strong></p>
 </div>
 
 ---
 
-<p align="center">
-  <a href="https://github.com/org2AI/ORG2/releases/latest/download/ORG2-latest-mac-apple-silicon.dmg"><strong>macOS Apple Silicon</strong></a>
-  ·
-  <a href="https://github.com/org2AI/ORG2/releases/latest/download/ORG2-latest-windows-x64-setup.exe"><strong>Windows installer</strong></a>
-  ·
-  <a href="https://github.com/org2AI/ORG2/releases/latest/download/ORG2-latest-windows-x64.msi"><strong>Windows MSI</strong></a>
-  ·
-  <a href="https://github.com/org2AI/ORG2/releases/latest/download/ORG2-latest-linux-x64.AppImage"><strong>Linux AppImage</strong></a>
-  ·
-  <a href="https://github.com/org2AI/ORG2/releases/latest/download/ORG2-latest-linux-x64.deb"><strong>Linux DEB</strong></a>
-  ·
-  <a href="https://github.com/org2AI/ORG2/releases/latest"><strong>All latest release assets</strong></a>
-</p>
-
+> **No TP Agent Studio installers are published yet.** macOS Apple Silicon, Windows 11, and Linux builds are undergoing identity, data-isolation, CI and signing verification. See [release readiness](FORK.md) and [engineering roadmap](docs/fork/ROADMAP.md).
 ---
 
 <p align="center">

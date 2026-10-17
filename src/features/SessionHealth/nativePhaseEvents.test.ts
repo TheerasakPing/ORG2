@@ -80,6 +80,9 @@ describe("native Rust session phase events", () => {
     expect(clearNativePhase(map, {
       sessionId: "session-A", turnId: "turn-1",
     })).toBe(map);
+    expect(clearNativePhase(map, {
+      sessionId: "session-A", // Legacy unscoped error must not clear turn-2.
+    })).toBe(map);
     expect(map.get("session-A")?.turnId).toBe("turn-2");
     expect(clearNativePhase(map, {
       sessionId: "session-A", turnId: "turn-2",

@@ -13,6 +13,7 @@ import {
   deriveLiveSessionSummary,
   type LiveSessionRow,
 } from "./liveSessionMonitorModel";
+import { countQuietSessions, phaseAdvisory } from "./sessionStallAdvisory";
 import {
   clearNativePhase,
   ingestNativePhase,
@@ -44,7 +45,7 @@ const STATUS_LABELS: Record<string, string> = {
   archived: "เก็บแล้ว / Archived",
 };
 
-function StatusRow({ row }: { row: LiveSessionRow }) {
+function StatusRow({ row, caution }: { row: LiveSessionRow; caution: string | null }) {
   const color = row.phase === "working"
     ? "bg-cyan-500"
     : row.phase === "attention"
@@ -62,6 +63,7 @@ function StatusRow({ row }: { row: LiveSessionRow }) {
           </p>
           <p className="text-xs text-text-2">{STATUS_LABELS[row.status] ?? "ไม่ทราบสถานะ / Unknown"}</p>
           <p className="mt-1 break-words text-[11px] text-text-3">{row.detail}</p>
+          {caution && <p className="mt-1 text-[11px] text-amber-600">{caution}</p>}
           {row.oldPersistedStatus && (
             <p className="mt-1 text-[11px] text-amber-600">
               ข้อมูลสถานะในฐานข้อมูลเก่ากว่า 10 นาที · ตรวจสอบเพิ่มเติม
@@ -116,6 +118,13 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
     [sessions, hookStatuses, activeOnly, nowMs, nativePhases]
   );
 
+  const quietCounts = useMemo(() => {
+    const activeNativeIds = summary.rows
+      .filter((row) => row.phase === "working" && row.source === "native-phase")
+      .map((row) => row.id);
+    return countQuietSessions(activeNativeIds, nativePhases, nowMs);
+  }, [summary.rows, nativePhases, nowMs]);
+
   const refresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -163,6 +172,10 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
             <div className="text-[10px] text-text-2">ข้อมูลเก่า</div>
           </div>
         </div>
+        <p className="mt-2 text-[11px] text-text-3" data-testid="session-monitor-silence-summary">
+          Phase silence: {quietCounts.quiet} quiet ≥5m · {quietCounts.expired} old ≥60m
+          {" · "}Only {quietCounts.observed} observed native turns
+        </p>
         <div className="mt-3 flex items-center justify-between gap-2 text-xs">
           <label className="flex items-center gap-2 text-text-2">
             <input type="checkbox" checked={activeOnly}
@@ -187,7 +200,13 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
         </p>
         {summary.rows.length ? (
           <ul className="space-y-2">
-            {summary.rows.map((row) => <StatusRow row={row} key={row.id} />)}
+            {summary.rows.map((row) => {
+              const advisory = row.phase === "working" && row.source === "native-phase"
+                ? phaseAdvisory(row.id, nativePhases, nowMs) : null;
+              const caution = advisory?.state === "quiet" || advisory?.state === "expired"
+                ? advisory.message : null;
+              return <StatusRow row={row} caution={caution} key={row.id} />;
+            })}
           </ul>
         ) : (
           <p className="rounded-xl border border-dashed border-border-2 p-6 text-center text-sm text-text-2">

@@ -1,4 +1,5 @@
 # Fork-only, unsigned experimental installers. Does not publish GitHub Releases.
+# The release candidate is built only when this workflow is updated on that branch.
 # Never enables the inherited upstream updater or upstream signing credentials.
 name: TP Agent Studio Preview Installers
 
@@ -7,6 +8,7 @@ on:
   push:
     branches:
       - integration/tp-agent-studio-develop
+      - integration/tp-all-prs-release-candidate
     paths:
       - .github/workflows/preview-installers.yml
 

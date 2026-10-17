@@ -1,3 +1,14 @@
+> **Independent community fork — TheerasakPing/ORG2**
+>
+> This repository is a fork of [org2AI/ORG2](https://github.com/org2AI/ORG2).
+> The download links below still point to the **upstream publisher**, not builds from this fork.
+> The fork's application updater is intentionally disabled pending independent signing and release infrastructure.
+> **Do not install experimental fork builds alongside upstream ORG2** until the app identity,
+> deep links and `~/.orgii` state/storage are isolated and migration-tested.
+> See [FORK.md](FORK.md) and [the fork roadmap](docs/fork/ROADMAP.md).
+
+---
+
 <div align="center">
   <h1>ORG-2</h1>
   <p><strong>The system of record for how agents build software.<br />Run your coding agents — replay any session, review as a team, and trace every line back to the decision behind it.</strong></p>

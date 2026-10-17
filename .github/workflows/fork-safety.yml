@@ -1,0 +1,20 @@
+name: Fork release safety
+
+on:
+  pull_request:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fork-release-safety:
+    name: Upstream updater protection
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify fork updater is fail-closed
+        run: node scripts/fork/check-safety.mjs

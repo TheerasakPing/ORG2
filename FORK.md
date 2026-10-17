@@ -11,7 +11,7 @@ The product name **ORG2** remains an upstream-derived placeholder until branding
 - The base Tauri updater has `plugins.updater.active=false` and `bundle.createUpdaterArtifacts=false`.
 - The custom Rust `check_app_update` command is also fail-closed while `FORK_UPDATER_READY=false`. This prevents silently installing upstream's release packages through a separate code path.
 - Upstream signing identities, update manifests, download links, app bundle identifiers, deep links, and `~/.orgii` user data paths **have not been migrated**.
-- The upstream `release.yaml` workflow references upstream credentials and infrastructure. Do not tag/publish production releases until a separate fork release workflow has been validated.
+- The inherited `release.yaml` workflow is guarded to run **only** in `org2AI/ORG2`, not this fork. Do not tag/publish production releases until a separate fork release workflow has been validated.
 
 ## Fork strategy
 

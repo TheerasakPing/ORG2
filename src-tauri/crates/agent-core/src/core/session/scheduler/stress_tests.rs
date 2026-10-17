@@ -73,7 +73,11 @@ async fn exercise_profile(session_count: usize) {
                         // Once all N first jobs have reached the barrier,
                         // cross-session scheduling has demonstrably overlapped.
                         first_barrier.wait().await;
-                        while !*hold_rx.borrow() {
+                        loop {
+                            // Drop the watch Ref before awaiting a mutable
+                            // changed() call (avoids a borrow across await).
+                            let released = { *hold_rx.borrow() };
+                            if released { break; }
                             if hold_rx.changed().await.is_err() {
                                 return Err("stress-lab release channel was dropped".into());
                             }
@@ -187,7 +191,9 @@ async fn targeted_stop_is_session_local_across_five_busy_workers() {
             ScheduledKind::Turn,
             Box::new(move || Box::pin(async move {
                 b.wait().await;
-                while !*rx.borrow() {
+                loop {
+                    let released = { *rx.borrow() };
+                    if released { break; }
                     if rx.changed().await.is_err() {
                         return Err("release was dropped".into());
                     }

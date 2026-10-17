@@ -798,11 +798,7 @@ pub async fn create_session(params: CreateSessionParams) -> Result<PtySessionIde
                             // flow-control window — an undelivered chunk is
                             // never ACKed and would shrink the window forever.
                             if !delivered {
-                                let _ = unacked_bytes.fetch_update(
-                                    Ordering::Relaxed,
-                                    Ordering::Relaxed,
-                                    |value| Some(value.saturating_sub(data_len)),
-                                );
+                                let _ = saturating_atomic_sub(&unacked_bytes, data_len);
                             }
                         }
 

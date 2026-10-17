@@ -4,6 +4,7 @@
  * Never hold prompts, tool args, provider URLs or error bodies here.
  */
 export const NATIVE_PHASE_EVENT = "agent:monitor_phase";
+export const NATIVE_PROGRESS_EVENT = "agent:monitor_progress";
 export const MAX_NATIVE_PHASE_RECORDS = 128;
 
 export type NativePhase =
@@ -15,6 +16,8 @@ export interface NativePhaseObservation {
   phase: NativePhase;
   tool: string | null;
   observedAtMs: number;
+  /** Last *actual* provider output, not a timed ping. */
+  lastProgressAtMs: number | null;
 }
 export type NativePhaseMap = ReadonlyMap<string, NativePhaseObservation>;
 
@@ -73,12 +76,47 @@ export function ingestNativePhase(
     phase,
     tool: phase === "provider_request" ? null : safeToolName(payload.tool),
     observedAtMs: nowMs,
+    lastProgressAtMs: null,
   });
   while (next.size > MAX_NATIVE_PHASE_RECORDS) {
     const first = next.keys().next().value;
     if (first === undefined) break;
     next.delete(first);
   }
+  return next;
+}
+
+/**
+ * A pulse exists only when Rust received a real provider delta (text,
+ * thinking, or model tool-call bytes), rate-limited at source.
+ * No payload content is retained; missing pulses do not prove a dead future.
+ */
+export function ingestNativeProgress(
+  current: NativePhaseMap,
+  payload: unknown,
+  nowMs = Date.now()
+): NativePhaseMap {
+  if (
+    !isRecord(payload) ||
+    !validId(payload.sessionId) ||
+    payload.kind !== "response_delta" ||
+    !validId(payload.turnId) ||
+    !Number.isFinite(nowMs) ||
+    nowMs < 0
+  )
+    return current;
+  const previous = current.get(payload.sessionId);
+  if (
+    !previous ||
+    previous.phase !== "provider_request" ||
+    previous.turnId !== payload.turnId ||
+    (previous.lastProgressAtMs !== null &&
+      nowMs <= previous.lastProgressAtMs) ||
+    nowMs < previous.observedAtMs
+  )
+    return current;
+  const next = new Map(current);
+  next.set(payload.sessionId, { ...previous, lastProgressAtMs: nowMs });
   return next;
 }
 

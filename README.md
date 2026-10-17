@@ -10,7 +10,13 @@
 > The fork's application updater is intentionally disabled pending independent signing and release infrastructure.
 > **Do not install experimental fork builds alongside upstream ORG2** until the app identity,
 > deep links and `~/.orgii` state/storage are isolated and migration-tested.
-> See [FORK.md](FORK.md) and [the fork roadmap](docs/fork/ROADMAP.md).
+> See [FORK.md](FORK.md), [the fork roadmap](docs/fork/ROADMAP.md),
+> [Cloud boundary audit](docs/fork/FORK_CLOUD_BOUNDARY.md) and [session-stall recovery](docs/fork/SESSION_STALL_RECOVERY.md).
+>
+> **Development status (17 October 2026):** changes are integrated on [PR #9](https://github.com/TheerasakPing/ORG2/pull/9)
+> against `develop`, **not yet merged or released**. CI must pass on the final commit,
+> including Rust on Windows/macOS, before the pull request is merged. Platform installer,
+> co-installation, memory/restart stress and fork-owned Cloud/OAuth acceptance tests remain outstanding.
 
 ---
 
@@ -39,6 +45,36 @@ Answering why a piece of code exists — and whether it worked — has always me
 ORG-2 is where your team runs its coding agents — a native Rust harness plus launchers for 20+ agent CLIs — and it builds that record automatically. Every session becomes a trajectory teammates replay like a video, reviewing how the work was actually built rather than just the diff and commenting in context. Sessions run in other tools are ingested and backfilled from their history, so the record covers work that never touched the app. The record links what the human asked for, what the agent understood, and what it actually did, so any shipped line traces back to the session that wrote it.
 
 It is not just another AI coding tool; it is an experiment in human/agent organizations and org-level alignment. ORG2 treats agents as persistent, observable colleagues inside a structured organization — replayable execution, cross-session memory, AI blame, and a local-first Rust runtime so humans, agents, and teams can collaborate around shared context and aligned goals.
+
+## TP Agent Studio fork status / สถานะการพัฒนา
+
+**ภาษาไทย:** TP Agent Studio เป็น Fork อิสระของ ORG2 ซึ่งกำลังพัฒนาระบบ Rust Agent Harness,
+การจัดการหลาย Session, Memory และการกู้คืนเมื่อการทำงานหยุดชะงัก ยังไม่มีไฟล์ติดตั้ง
+ที่ผ่านการตรวจสอบสำหรับ macOS Apple Silicon (M4), Windows 11 หรือ Linux
+และ **ยังไม่ควรใช้งานกับบัญชี Cloud จริงหรือข้อมูลที่สำคัญ** จนกว่าการแยกบริการ
+OAuth/Cloud และทดสอบการย้ายข้อมูลจะเสร็จสมบูรณ์
+
+### Recent work (integration PR #9)
+
+| Area | Implemented in the PR branch | Remaining verification |
+| --- | --- | --- |
+| Desktop identity | Independent TP Agent Studio package IDs, two-tone icons, fork deep-link scheme, dedicated profile roots and ports | Cross-platform install + side-by-side tests, remaining legacy resources |
+| Rust Agent Harness / Session recovery | Per-session worker replacement after unexpected termination, future-factory panic isolation and persisted failure status | Heavy 1/5/20/50-session stress tests, long-hanging providers/tools, native E2E |
+| Restart recovery | Continue independent startup DB reconciliation phases after partial errors; avoid automatically replaying side-effectful tools | Crash/kill/restart simulation on each OS and database integrity checks |
+| Memory | Initial file-lease and fork-profile isolation hardening | Cross-process kill/restart proof, workspace-local migration, OS-specific validation |
+| CI | Automated frontend, security, Rust and quality checks on every PR push | All checks green on **final** HEAD, including Windows Tauri icon parsing |
+| Cloud / account isolation | Ownership risks documented; app updater and inherited upstream release workflow disabled | Fork-owned backend, callback allowlists, secure credentials, billing and release signing |
+
+This is **source-level hardening**, not a confirmed resolution for every multi-session freeze.
+A never-resolving provider/tool call can still make a session look busy; do not delete
+`sessions.db` or its WAL files to "unfreeze" the app. Use the non-destructive
+[session-stall diagnostic and recovery guide](docs/fork/SESSION_STALL_RECOVERY.md).
+
+**Important:** GitHub commits on this fork do **not** modify an installed upstream ORG2 application.
+To track code review and CI: [integration PR #9](https://github.com/TheerasakPing/ORG2/pull/9) ·
+[GitHub Actions](https://github.com/TheerasakPing/ORG2/actions) ·
+[Cloud/OAuth release blockers](docs/fork/FORK_CLOUD_BOUNDARY.md) ·
+[two-tone icon and regeneration](docs/fork/TWO_TONE_BRANDING.md).
 
 ## Features
 
@@ -197,7 +233,7 @@ Use ORG2's built-in Rust harness or launch these supported coding-agent CLIs fro
 
 Current source version: v2.0.8 (2026-09-23)
 
-**No independently signed TP Agent Studio installers are available yet.** This fork is being developed and tested separately from the original publisher. Builds will only be linked after macOS, Windows and Linux identity, migration, packaging and signature verification are complete.
+**No independently signed TP Agent Studio installers are available yet.** This fork is being developed and tested separately from the original publisher. Releases are blocked on green CI, Windows icon packaging, concurrency/restart stress testing, independent Cloud/OAuth and data/installer coexistence, and release signing. Builds will only be linked after macOS, Windows and Linux identity, migration, packaging and signature verification are complete.
 
 See [Fork Engineering Guide](FORK.md) for current safety status. Do not mistake upstream installers for releases of this fork.
 

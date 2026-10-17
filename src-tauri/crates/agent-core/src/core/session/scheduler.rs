@@ -138,6 +138,29 @@ mod scheduler_heartbeat_payload_tests {
         assert_eq!(payload["epoch"], 18);
         assert_eq!(payload["turnIntentId"], "intent-new");
     }
+
+    #[tokio::test]
+    async fn observation_does_not_complete_or_cancel_a_pending_turn() {
+        use std::time::Duration;
+
+        let (release, pending) = tokio::sync::oneshot::channel::<u32>();
+        let observed = tokio::spawn(async move {
+            super::await_with_scheduler_heartbeat("session", "turn", 1, async {
+                pending.await.expect("test releases pending future")
+            }).await
+        });
+        // Wait long enough for the immediate first interval tick to be
+        // eligible, but not for its 15-second follow-up. The wait is NOT an
+        // agent timeout and must never cancel the pending future.
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert!(!observed.is_finished());
+        release.send(42).expect("listener still owns the pending future");
+        let result = tokio::time::timeout(Duration::from_secs(2), observed)
+            .await
+            .expect("released turn must complete")
+            .expect("test task must not panic");
+        assert_eq!(result, 42);
+    }
 }
 
 // ============================================

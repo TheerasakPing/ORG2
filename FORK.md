@@ -8,7 +8,7 @@ Upstream: https://github.com/org2AI/ORG2 (tracked on branch `develop`).
 
 - **Fork exists** with its own GitHub ownership and history.
 - **Not independently distributable yet.** Do not install test builds side by side with upstream ORG2.
-- The base Tauri updater has `plugins.updater.active=false` and `bundle.createUpdaterArtifacts=false`.
+- The base Tauri updater has `plugins.updater.active=false`, an empty endpoints list and `bundle.createUpdaterArtifacts=false`. Fork README no longer links to upstream production installers.
 - The custom Rust `check_app_update` command is also fail-closed while `FORK_UPDATER_READY=false`. This prevents silently installing upstream's release packages through a separate code path.
 - Original two-tone desktop icon artwork and generated macOS/Windows/Linux icon assets are introduced for production and Dev, with the default macOS live Dock variant included (see [branding guide](docs/fork/TWO_TONE_BRANDING.md)).
 - Base and development Tauri identities, deep-link schemes, macOS signing placeholders, application data defaults, runtime ports, and external history defaults have been moved to **TP Agent Studio**. **This does not yet prove complete profile isolation**: external tool hooks, sidecars, inherited assets/credentials and fresh-install behavior require integration tests.

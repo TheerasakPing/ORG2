@@ -2,7 +2,7 @@
 
 This repository is the independent development fork maintained at **TheerasakPing/ORG2**.
 Upstream: https://github.com/org2AI/ORG2 (tracked on branch `develop`).
-The product name **ORG2** remains an upstream-derived placeholder until branding, state isolation, and release infrastructure are approved and implemented.
+**TP Agent Studio** is the provisional product name. Fork-specific desktop IDs and paths are being introduced, but complete isolation and production release readiness are still unverified.
 
 ## Current safety status
 
@@ -10,7 +10,7 @@ The product name **ORG2** remains an upstream-derived placeholder until branding
 - **Not independently distributable yet.** Do not install test builds side by side with upstream ORG2.
 - The base Tauri updater has `plugins.updater.active=false` and `bundle.createUpdaterArtifacts=false`.
 - The custom Rust `check_app_update` command is also fail-closed while `FORK_UPDATER_READY=false`. This prevents silently installing upstream's release packages through a separate code path.
-- Upstream signing identities, update manifests, download links, app bundle identifiers, deep links, and `~/.orgii` user data paths **have not been migrated**.
+- Base and development Tauri identities, deep-link schemes, macOS signing placeholders, application data defaults, runtime ports, and external history defaults have been moved to **TP Agent Studio**. **This does not yet prove complete profile isolation**: external tool hooks, sidecars, inherited assets/credentials and fresh-install behavior require integration tests.
 - The inherited `release.yaml` workflow is guarded to run **only** in `org2AI/ORG2`, not this fork. Do not tag/publish production releases until a separate fork release workflow has been validated.
 
 ## Fork strategy
@@ -37,6 +37,7 @@ pnpm install --frozen-lockfile
 pnpm run download:sidecars
 pnpm run tauri:dev
 node scripts/fork/check-safety.mjs
+node scripts/fork/check-identity.mjs
 pnpm typecheck
 pnpm test
 cd src-tauri
@@ -44,7 +45,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --no-fail-fast
 ```
 
-CI file `.github/workflows/fork-safety.yml` checks the release-safety posture independent of Rust/Node dependencies. The above commands are validation targets, **not claims that tests have passed on this fork**.
+CI file `.github/workflows/fork-safety.yml` checks the release-safety and desktop-identity posture independent of Rust/Node dependencies. The above commands are validation targets, **not claims that tests have passed on this fork**.
 
 ## Contribution and upstream notice
 

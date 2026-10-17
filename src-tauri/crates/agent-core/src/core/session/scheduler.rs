@@ -121,6 +121,45 @@ pub struct ScheduledMessage {
     pub execute: ExecuteFn,
 }
 
+/// Decrement a pending-message counter only when nonzero, retaining
+/// exactly the old checked_sub + fetch_update semantics on Rust MSRV 1.85.
+fn decrement_pending(counter: &AtomicUsize) {
+    let mut current = counter.load(Ordering::Acquire);
+    while current > 0 {
+        match counter.compare_exchange_weak(
+            current,
+            current - 1,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return,
+            Err(actual) => current = actual,
+        }
+    }
+}
+
+#[cfg(test)]
+mod atomic_pending_tests {
+    use super::decrement_pending;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn pending_counter_never_underflows() {
+        let count = Arc::new(AtomicUsize::new(7));
+        let tasks: Vec<_> = (0..20)
+            .map(|_| {
+                let count = Arc::clone(&count);
+                std::thread::spawn(move || decrement_pending(&count))
+            })
+            .collect();
+        for handle in tasks {
+            handle.join().unwrap();
+        }
+        assert_eq!(count.load(Ordering::Acquire), 0);
+    }
+}
+
 pub(crate) fn panic_payload_to_string(payload: &(dyn Any + Send)) -> String {
     if let Some(message) = payload.downcast_ref::<String>() {
         return message.clone();
@@ -478,11 +517,7 @@ impl WorkerTask {
                 }
             };
             if targeted_cancelled {
-                let _ = self
-                    .pending
-                    .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                        count.checked_sub(1)
-                    });
+                decrement_pending(&self.pending);
                 crate::foundation::session_bridge::update_turn_intent_status(
                     &self.session_id,
                     &msg.turn_intent_id,
@@ -524,11 +559,7 @@ impl WorkerTask {
                 continue;
             }
 
-            let _ = self
-                .pending
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                    count.checked_sub(1)
-                });
+            decrement_pending(&self.pending);
 
             let is_turn = msg.kind == ScheduledKind::Turn;
             self.processing.store(true, Ordering::Relaxed);

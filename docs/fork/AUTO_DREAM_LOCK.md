@@ -18,7 +18,7 @@ The original `.consolidate-lock` protocol wrote the process PID and then read it
 2. Only the RAII production entry point holds the lock. The timestamp/PID helper is now private; no product code should bypass the lease.
 3. This change does **not** separate per-workspace `.orgii` memory from an upstream ORG2 instance opening the same project. Cross-product workspace metadata requires an opt-in compatibility/migration plan.
 4. Crash consistency of the timestamp-based time-gate remains separate from exclusive ownership: a hard process crash may retain a too-recent timestamp; this will need a committed timestamp / in-progress marker split.
-5. Test on physical macOS Apple Silicon, Windows 11 and Linux; add multi-process kill/restart tests and record results before shipping.
+5. Run the included separate-process exclusion test on macOS Apple Silicon, Windows 11 and Linux; add *hard-kill/restart* tests and record successful results before shipping.
 
 ## Focused check
 

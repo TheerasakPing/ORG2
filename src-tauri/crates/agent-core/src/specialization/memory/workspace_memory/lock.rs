@@ -81,6 +81,12 @@ impl Drop for ConsolidationLease {
         if !self.committed {
             rollback(&self.workspace, self.prior_mtime_ms);
         }
+        // Release the OS lease synchronously before this destructor returns.
+        // Relying on File field teardown alone can defer the immediate
+        // post-commit probe on macOS CI.
+        if let Err(err) = fs2::FileExt::unlock(&self._lock_file) {
+            warn!("[consolidation_lock] explicit lease unlock failed: {}", err);
+        }
     }
 }
 
@@ -101,8 +107,9 @@ pub fn is_lease_held(workspace: &Path) -> Result<bool, String> {
         .map_err(|err| format!("open consolidation lease for status: {err}"))?;
     match fs2::FileExt::try_lock_exclusive(&lock_file) {
         Ok(()) => {
-            // The lease is available. Closing the file releases the lock.
-            drop(lock_file);
+            // Release immediately even when a platform defers handle cleanup.
+            fs2::FileExt::unlock(&lock_file)
+                .map_err(|err| format!("release consolidation status probe: {err}"))?;
             Ok(false)
         }
         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => Ok(true),

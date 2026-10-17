@@ -5,6 +5,7 @@
 import { useAtomValue } from "jotai";
 import React, { useEffect, useMemo, useState } from "react";
 
+import { useTauriListen } from "@src/hooks/platform/useTauriListen";
 import { agentLiveStatusAtom } from "@src/store/session/agentLiveStatusAtom";
 import { loadSessionRoster, sessionsAtom } from "@src/store/session";
 
@@ -12,6 +13,12 @@ import {
   deriveLiveSessionSummary,
   type LiveSessionRow,
 } from "./liveSessionMonitorModel";
+import {
+  clearNativePhase,
+  ingestNativePhase,
+  NATIVE_PHASE_EVENT,
+  type NativePhaseMap,
+} from "./nativePhaseEvents";
 
 interface LiveSessionMonitorPanelProps {
   onClose: () => void;
@@ -73,6 +80,20 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
   const [nowMs, setNowMs] = useState(Date.now);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
+  const [nativePhases, setNativePhases] = useState<NativePhaseMap>(() => new Map());
+
+  // Three low-volume Tauri event subscriptions only while expanded.
+  // Payloads are validated and minimized before state ingestion. Never
+  // subscribe to high-frequency message or thinking delta streams here.
+  useTauriListen<unknown>(NATIVE_PHASE_EVENT, (payload) => {
+    setNativePhases((previous) => ingestNativePhase(previous, payload));
+  });
+  useTauriListen<unknown>("agent:complete", (payload) => {
+    setNativePhases((previous) => clearNativePhase(previous, payload));
+  });
+  useTauriListen<unknown>("agent:error", (payload) => {
+    setNativePhases((previous) => clearNativePhase(previous, payload));
+  });
 
   // Age labels are only recalculated while the panel is open and the window
   // is visible; closing unmounts this panel and clears its sole interval.
@@ -91,8 +112,8 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
   }, [onClose]);
 
   const summary = useMemo(
-    () => deriveLiveSessionSummary(sessions, hookStatuses, { activeOnly, nowMs }),
-    [sessions, hookStatuses, activeOnly, nowMs]
+    () => deriveLiveSessionSummary(sessions, hookStatuses, { activeOnly, nowMs, nativePhases }),
+    [sessions, hookStatuses, activeOnly, nowMs, nativePhases]
   );
 
   const refresh = async () => {
@@ -175,7 +196,7 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
         )}
       </div>
       <footer className="shrink-0 border-t border-border-1 px-4 py-3 text-[11px] text-text-3">
-        <p>Live updates จากสถานะที่ส่งเข้ามา · ไม่มีการโหลด Transcript อัตโนมัติ</p>
+        <p>Live updates จาก Rust Provider/Tool boundary และ CLI Hook · ไม่โหลด Transcript อัตโนมัติ</p>
         <p>“ข้อมูลเก่า” = เวลาบันทึกสถานะเก่า ไม่ใช่หลักฐานว่า Provider/Tool ค้าง</p>
       </footer>
     </section>

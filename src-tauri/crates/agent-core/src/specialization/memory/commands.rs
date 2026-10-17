@@ -674,23 +674,15 @@ pub async fn workspace_memory_status(workspace: String) -> Result<WorkspaceMemor
             0
         };
 
-        // try_acquire failure (e.g. file create error from disk-full,
-        // permission flip, parent dir vanished) is NOT the same thing
-        // as "lock not held" — but we report the same UI status. Warn
-        // so the operator can correlate a `false` with the actual
-        // I/O fault. Behavior is preserved (still surfaces as
-        // "lock_held: false") but the cause is no longer silent.
-        let lock_held = match consolidation_lock::try_acquire(ws) {
-            Ok(Some(prior)) => {
-                consolidation_lock::rollback(ws, prior);
-                false
-            }
-            Ok(None) => true,
+        // A UI status read must never acquire and roll back the actual
+        // consolidation timestamp. Check the OS lease separately.
+        let lock_held = match consolidation_lock::is_lease_held(ws) {
+            Ok(held) => held,
             Err(err) => {
                 tracing::warn!(
                     workspace = %ws.display(),
                     error = %err,
-                    "memory::workspace_memory_status: try_acquire failed; reporting lock_held=false but the actual lock state is unknown"
+                    "memory::workspace_memory_status: cannot probe the OS lease; showing lock_held=false"
                 );
                 false
             }

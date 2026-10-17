@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 /// Transport adapter trait - All platforms must implement this interface
+// async_trait produces boxed must-use futures. Narrowly silence the macro
+// expansion's duplicate #[must_use] warning on current Clippy toolchains.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait TransportAdapter: Send + Sync + Debug {
     /// Emit agent event to frontend

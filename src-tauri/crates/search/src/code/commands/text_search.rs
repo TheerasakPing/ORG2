@@ -23,8 +23,9 @@ struct SearchBudget {
 struct Permit;
 impl Permit {
     fn acquire() -> Result<Self, String> {
-        // Preserve the project's MSRV across toolchains that have deprecated
-        // fetch_update, without sacrificing the four-worker admission limit.
+        // Portable to the project's minimum Rust version and current stable:
+        // newer toolchains deprecate fetch_update in favor of try_update.
+        // A CAS loop retains the original 4-worker admission bound.
         let mut workers = WORKERS.load(Ordering::Acquire);
         loop {
             if workers >= 4 {

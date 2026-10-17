@@ -49,6 +49,23 @@ use super::turn::streaming::{
 };
 use crate::bus::broadcast_event;
 
+/// Release one queued-message slot without underflow; this CAS loop stays
+/// compatible with Rust versions where fetch_update is deprecated or absent.
+fn decrement_pending(pending: &AtomicUsize) {
+    let mut before = pending.load(Ordering::Acquire);
+    while before > 0 {
+        match pending.compare_exchange_weak(
+            before,
+            before - 1,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return,
+            Err(actual) => before = actual,
+        }
+    }
+}
+
 // ============================================
 // Scheduled Message
 // ============================================
@@ -478,11 +495,7 @@ impl WorkerTask {
                 }
             };
             if targeted_cancelled {
-                let _ = self
-                    .pending
-                    .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                        count.checked_sub(1)
-                    });
+                decrement_pending(&self.pending);
                 crate::foundation::session_bridge::update_turn_intent_status(
                     &self.session_id,
                     &msg.turn_intent_id,
@@ -524,11 +537,7 @@ impl WorkerTask {
                 continue;
             }
 
-            let _ = self
-                .pending
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                    count.checked_sub(1)
-                });
+            decrement_pending(&self.pending);
 
             let is_turn = msg.kind == ScheduledKind::Turn;
             self.processing.store(true, Ordering::Relaxed);

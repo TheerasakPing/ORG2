@@ -181,6 +181,39 @@ describe("Org2CloudEndpointOverrideSchema", () => {
     ).toBe(false);
   });
 
+  it("normalizes endpoint roots to their canonical origins", () => {
+    expect(
+      Org2CloudEndpointOverrideSchema.parse({
+        ...OVERRIDE,
+        webOrigin: "https://cloud.acme.dev:443/",
+        supabaseUrl: "http://[::1]:54321/",
+      })
+    ).toEqual({
+      ...OVERRIDE,
+      webOrigin: "https://cloud.acme.dev",
+      supabaseUrl: "http://[::1]:54321",
+    });
+  });
+
+  it("rejects embedded credentials, non-root paths, queries and fragments", () => {
+    const invalidOrigins = [
+      "https://user:password@cloud.acme.dev",
+      "https://cloud.acme.dev/login",
+      "https://cloud.acme.dev/?token=secret",
+      "https://cloud.acme.dev/#callback",
+    ];
+    for (const origin of invalidOrigins) {
+      for (const field of ["webOrigin", "supabaseUrl"] as const) {
+        expect(
+          Org2CloudEndpointOverrideSchema.safeParse({
+            ...OVERRIDE,
+            [field]: origin,
+          }).success
+        ).toBe(false);
+      }
+    }
+  });
+
   it("rejects an empty anon key", () => {
     expect(
       Org2CloudEndpointOverrideSchema.safeParse({

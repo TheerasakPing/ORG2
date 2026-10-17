@@ -170,6 +170,49 @@ The existing dead-Worker replacement on **next enqueue** remains as-is.
 This PR does not add proactive worker recovery and does not certify
 a recovered native turn across app restart.
 
+## V5 — Worker Overview from the live native runtime (stacked PR)
+
+**Worker Overview** is shown at the top of the open Monitor panel. A new
+read-only Tauri RPC command `agent_scheduler_worker_overview` reads the
+in-memory `AgentAppState.sessions` registry and queries the existing
+`DialogScheduler.worker_snapshot()` for each registered native session.
+
+| Counter | Exact meaning |
+| --- | --- |
+| Registered sessions | AgentSession objects **currently retained in RAM**; not lifetime session history. |
+| Workers created | Scheduler workers that were lazily spawned at least once and still retain a handle, including terminated handles. |
+| Live workers | Spawned handles whose Tokio task is unfinished and channel receiver open. |
+| Running jobs | Live workers executing a Turn **or** maintenance job. |
+| Active Turns | Subset of running jobs processing a user-facing Turn. |
+| Maintenance | Subset of running jobs processing internal maintenance. |
+| Idle workers | Spawned, live workers not executing a job. |
+| Queued jobs | Approximate pending message count, excluding the running job. |
+| Dead / closed | Retained Worker handles whose Tokio task has finished or channel closed. |
+| Not started | Registered sessions that never spawned a Worker. |
+
+The command **does not create a Worker**, read SQLite/Cloud history or
+include any Session ID, tenant identifier, workspace path, prompt, tool
+argument or credential. The only response consists of ten numeric counts.
+A short in-memory registry lock clones the handles and is **released before
+awaiting** scheduler snapshots, avoiding a global lock convoy. Snapshot
+values can change during aggregation, so counters are best effort, not
+an atomic epoch-coherent system state.
+
+On opening the panel the frontend requests **one aggregate snapshot**,
+refreshes while visible **at most once per 60 seconds**, and also offers
+manual Refresh. Overlapping requests are joined and stale responses
+cannot update an unmounted panel. If IPC fails it displays the previous
+snapshot and a warning; if no snapshot exists, the UI displays a dash,
+not a falsely reassuring zero. The panel doesn't invoke per-session
+history endpoints or start a new job.
+
+**Scope:** counts only in-process, native Rust `DialogScheduler` tasks.
+External CLI subprocesses, sidecar agents, Cloud workers, background
+subagents and OS threads are **not** included. A dead/closed handle is
+a fact about the in-memory Worker handle, but doesn't automatically
+prove whether its last Turn persisted correctly. Recovery remains
+non-destructive and manual, with no replay or reset action attached.
+
 **Next phases** (not included in v1):
 1. Rust-native **session-scoped** provider/tool periodic heartbeat, with a
    monotonic per-turn generation and a bounded event schema that never

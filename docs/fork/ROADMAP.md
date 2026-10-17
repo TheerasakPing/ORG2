@@ -5,6 +5,52 @@
 **Upstream:** https://github.com/org2AI/ORG2
 **Tracking:** GitHub Issues are currently disabled on this fork; this file is the active task checklist until Issues are enabled.
 
+## Progress snapshot — 17 October 2026
+
+**11 of 34 tracked checklist items marked `[x]` (32.4%); 23 remain `[ ]`.**
+This is **source-implementation/checklist progress, not production release readiness**.
+The source integration work lives in [draft PR #9](https://github.com/TheerasakPing/ORG2/pull/9);
+the Cloud audit and endpoint input hardening are on the separate
+[`feature/tp-cloud-boundary-audit` branch](https://github.com/TheerasakPing/ORG2/tree/feature/tp-cloud-boundary-audit)
+and are **not merged into PR #9 or `develop`**.
+
+| Phase | Marked done | Pending | Scope |
+| --- | ---: | ---: | --- |
+| P0 — Ownership / packaging | 8 / 14 | 6 | Source hardening; release blockers remain |
+| P1 — Reliability / security | 3 / 10 | 7 | Scheduler/restart and memory-lease fixes; high-load E2E pending |
+| P2 — Unified agent experience | 0 / 5 | 5 | Not yet completed |
+| P3 — Product / automation | 0 / 5 | 5 | Not yet completed |
+| **Total** | **11 / 34** | **23** | **32.4% checklist progress** |
+
+**Completed P0 source tasks:** original two-tone icons; fork Tauri IDs; isolated profile
+and port defaults; disabled original/upstream updater; removed original publisher's
+installer links; hardened profile-root traversal/symlink guard; aligned runtime
+callback ports/schemes; added the separate offline Cloud boundary audit and
+strict custom endpoint-origin validation.
+
+**Completed P1 source tasks:** exclusive auto-dream file lease; scheduler panic
+containment/dead worker recovery and durable failure status; independent startup
+session/turn-intent recovery phases.
+
+**Verification on PR #9 at snapshot time:**
+[CI run #39023376993](https://github.com/TheerasakPing/ORG2/actions/runs/39023376993)
+has passing Windows Clippy, Frontend, CodeQL, Fork release safety, queue,
+dependency and typed-lint checks; the macOS Rust job has completed Clippy and
+is running workspace tests, so **the complete CI run is still not green**.
+`cargo audit` is skipped by the workflow's dependency-change condition;
+a skip is not a successful audit. The Cloud audit branch has additional
+source tests but **no completed CI verification or released installer**.
+
+**Release gates that remain open regardless of checklist percentage:**
+independently owned Cloud/auth/billing; signing and distribution;
+safe workspace-local `.orgii` migration; side-by-side installation/rollback;
+native E2E tests on all three OSes; and 1/5/20/50 concurrent-session hang,
+crash/restart and provider-timeout stress tests.
+
+> Do not merge, announce general availability, or treat `[x]` as production
+> acceptance. Each item reflects the scope explicitly written in that line.
+
+
 ## P0 — Safe ownership and packaging (must pass before installers)
 
 - [ ] Select a final brand and domain; inventory ORG2 trademarks and upstream-only UI links.

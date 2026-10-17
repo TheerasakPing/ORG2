@@ -42,7 +42,8 @@
 
 - [ ] Define a shared session identity/event provenance contract for native Rust Harness and external CLI sessions.
 - [ ] Preserve multi-agent task/call provenance across replay, forks, and resume.
-- [x] Add a bounded, on-demand live Session Monitor panel using existing Rust roster and CLI hook status signals; native provider/tool step remains unobserved. See [Live Monitor v1](LIVE_SESSION_MONITOR.md).
+- [x] Add a bounded, on-demand live Session Monitor panel using existing Rust roster and CLI hook status signals. See [Live Monitor](LIVE_SESSION_MONITOR.md).
+- [x] Emit content-free native Rust provider-request/tool-execute-start/tool-result transition events and project them into the opened Monitor (stacked PR, acceptance CI pending). These are not periodic heartbeats or proof of provider liveness.
 - [ ] Build a unified runtime dashboard: tokens, costs, tool latency, retry reason, memory queue, session CPU/RAM, pending approvals.
 - [ ] Add permissions preview and audit receipts for CLI, MCP, desktop and browser execution.
 - [ ] Improve agent-team orchestration with role capabilities, checkpoints, budgets and human approval rules.

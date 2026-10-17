@@ -30,6 +30,26 @@ fn lock_path(workspace: &Path) -> PathBuf {
     super::memory_dir(workspace).join(LOCK_FILE)
 }
 
+/// Probe actual consolidation ownership without changing the last-success
+/// timestamp or attempting the old PID protocol. UI status must be read-only.
+pub fn is_lease_held(workspace: &Path) -> Result<bool, String> {
+    let path = super::memory_dir(workspace).join(LEASE_FILE);
+    let file = match OpenOptions::new().read(true).write(true).open(&path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(format!("open consolidation lease status: {err}")),
+    };
+    match fs2::FileExt::try_lock_exclusive(&file) {
+        Ok(()) => {
+            fs2::FileExt::unlock(&file)
+                .map_err(|err| format!("release consolidation status probe: {err}"))?;
+            Ok(false)
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => Ok(true),
+        Err(err) => Err(format!("probe consolidation lease: {err}")),
+    }
+}
+
 /// Read the mtime of the lock file as `lastConsolidatedAt`.
 /// Returns 0 if the file doesn't exist.
 pub fn read_last_consolidated_at(workspace: &Path) -> u64 {
@@ -379,6 +399,21 @@ mod tests {
             .expect("lease available");
         lease.commit();
         assert!(read_last_consolidated_at(tmp.path()) > 0);
+    }
+
+    #[test]
+    fn status_probe_never_mutates_consolidation_timestamp() {
+        let tmp = TempDir::new().unwrap();
+        assert!(!is_lease_held(tmp.path()).unwrap());
+        assert_eq!(read_last_consolidated_at(tmp.path()), 0);
+        let lease = try_acquire_lease(tmp.path()).unwrap().unwrap();
+        let timestamp = read_last_consolidated_at(tmp.path());
+        assert!(timestamp > 0);
+        assert!(is_lease_held(tmp.path()).unwrap());
+        assert_eq!(read_last_consolidated_at(tmp.path()), timestamp);
+        drop(lease);
+        assert!(!is_lease_held(tmp.path()).unwrap());
+        assert_eq!(read_last_consolidated_at(tmp.path()), 0);
     }
 
     #[test]

@@ -60,6 +60,7 @@ OAuth/Cloud และทดสอบการย้ายข้อมูลจ�
 | --- | --- | --- |
 | Desktop identity | Independent TP Agent Studio package IDs, two-tone icons, fork deep-link scheme, dedicated profile roots and ports | Cross-platform install + side-by-side tests, remaining legacy resources |
 | Rust Agent Harness / Session recovery | Per-session worker replacement after unexpected termination, future-factory panic isolation and persisted failure status | Heavy 1/5/20/50-session stress tests, long-hanging providers/tools, native E2E |
+| Long-running Session notice (separate branch) | An observation-only 3-minute watchdog, 5-minute reminders, session-scoped IPC/UI status-trail warnings and 15-locale text; no unsafe tool replay | Source tests committed but CI/native validation pending; true progress/heartbeat and safe cancellation remain P1 work |
 | Restart recovery | Continue independent startup DB reconciliation phases after partial errors; avoid automatically replaying side-effectful tools | Crash/kill/restart simulation on each OS and database integrity checks |
 | Memory | Initial file-lease and fork-profile isolation hardening | Cross-process kill/restart proof, workspace-local migration, OS-specific validation |
 | CI | Automated frontend, security, Rust and quality checks on every PR push | All checks green on **final** HEAD, including Windows Tauri icon parsing |

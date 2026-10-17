@@ -54,9 +54,13 @@ impl RuntimeInstanceProfile {
             return Err("Fork data root must be an absolute path");
         }
         let upstream = user_home.join(".orgii");
-        let configured_real = configured.canonicalize().unwrap_or_else(|_| configured.to_path_buf());
-        let upstream_real = upstream.canonicalize().unwrap_or(upstream);
-        if configured_real.starts_with(&upstream_real) {
+        // Normalize '..' even when a directory has not been created yet and
+        // resolve the nearest existing ancestor. A plain canonicalize()
+        // fallback on the raw path let non-existent paths hide traversal or
+        // parent symlinks into the upstream profile.
+        let configured_real = resolve_profile_candidate(configured)?;
+        let upstream_real = resolve_profile_candidate(&upstream)?;
+        if profile_path_contains(&upstream_real, &configured_real) {
             return Err("Fork data root must not point to the upstream ORG2 profile");
         }
         Ok(())
@@ -115,6 +119,73 @@ impl RuntimeInstanceProfile {
     }
 }
 
+/// Normalize a full, absolute profile path before consulting the filesystem.
+/// No filesystem modifications are made: existing symlinks are resolved, while
+/// missing trailing components retain their identity under an existing parent.
+/// This guards accidental overlaps; it is not a symlink-race sandbox.
+fn resolve_profile_candidate(path: &Path) -> Result<PathBuf, &'static str> {
+    use std::path::Component;
+    if !path.is_absolute() {
+        return Err("Profile path must be absolute");
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return Err("Profile path escapes the filesystem root");
+                }
+            }
+        }
+    }
+
+    let mut parent = normalized;
+    let mut missing = Vec::new();
+    loop {
+        match std::fs::symlink_metadata(&parent) {
+            Ok(_) => {
+                let mut real = parent
+                    .canonicalize()
+                    .map_err(|_| "Cannot resolve a symlink in the profile path")?;
+                for suffix in missing.iter().rev() {
+                    real.push(suffix);
+                }
+                return Ok(real);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                let Some(name) = parent.file_name() else {
+                    return Err("Cannot resolve the profile path root");
+                };
+                missing.push(name.to_os_string());
+                if !parent.pop() {
+                    return Err("Cannot resolve the profile path parent");
+                }
+            }
+            Err(_) => return Err("Cannot inspect the profile path"),
+        }
+    }
+}
+
+/// Windows paths are case-insensitive even when a not-yet-created child
+/// does not exist for std::fs::canonicalize to normalize its final segment.
+fn profile_path_contains(parent: &Path, candidate: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let p = parent.to_string_lossy().to_ascii_lowercase();
+        let c = candidate.to_string_lossy().to_ascii_lowercase();
+        let sep = std::path::MAIN_SEPARATOR;
+        c == p || c.starts_with(&format!("{p}{sep}"))
+    }
+    #[cfg(not(windows))]
+    {
+        candidate.starts_with(parent)
+    }
+}
+
 fn parse_fork_instance_id(identifier: &str) -> Option<u16> {
     FORK_INSTANCE_IDENTIFIER_PREFIXES
         .iter()
@@ -136,6 +207,45 @@ fn parse_instance_id(identifier: &str) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_missing_suffix_and_parent_traversal_into_upstream_data() {
+        let tmp = tempfile::tempdir().unwrap();
+        let user_home = tmp.path();
+        let upstream = user_home.join(".orgii");
+        std::fs::create_dir_all(&upstream).unwrap();
+
+        let fork = RuntimeInstanceProfile::from_identifier(FORK_IDENTIFIER);
+        assert!(fork.validate_explicit_home(user_home, &upstream).is_err());
+        assert!(fork
+            .validate_explicit_home(user_home, &user_home.join("scratch/../.orgii/secrets"))
+            .is_err());
+        assert!(fork
+            .validate_explicit_home(user_home, &upstream.join("not-yet-created/sessions.db"))
+            .is_err());
+        assert!(fork
+            .validate_explicit_home(user_home, &user_home.join(".orgii-suffix"))
+            .is_ok());
+        assert!(fork
+            .validate_explicit_home(user_home, &user_home.join(".tp-agent-studio"))
+            .is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_parent_into_upstream_profile() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let upstream = tmp.path().join(".orgii");
+        std::fs::create_dir_all(&upstream).unwrap();
+        let link = tmp.path().join("alias");
+        symlink(&upstream, &link).unwrap();
+        let fork = RuntimeInstanceProfile::from_identifier(FORK_IDENTIFIER);
+        assert!(fork.validate_explicit_home(tmp.path(), &link).is_err());
+        assert!(fork
+            .validate_explicit_home(tmp.path(), &link.join("new-profile"))
+            .is_err());
+    }
 
     #[test]
     fn independent_fork_uses_distinct_ports_and_profiles() {

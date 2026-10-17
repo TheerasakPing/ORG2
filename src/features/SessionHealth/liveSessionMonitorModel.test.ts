@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { AgentLiveStatus } from "@src/api/tauri/rpc/schemas/agentOrgs";
 import type { Session } from "@src/store/session/sessionAtom/types";
 
-import { ingestNativePhase } from "./nativePhaseEvents";
+import { ingestNativePhase, ingestNativeProgress } from "./nativePhaseEvents";
+import { PROVIDER_FIRST_OUTPUT_ADVISORY_MS } from "./progressAssessment";
 
 import {
   deriveLiveSessionSummary,
@@ -235,6 +236,45 @@ describe("live session monitor presentation model", () => {
     expect(summary.rows[0]?.source).toBe("cli-hook");
     expect(summary.rows[0]?.detail).toContain("waiting for user");
     expect(JSON.stringify(summary)).not.toContain("SECRET");
+  });
+
+
+  it("shows a quiet native provider advisory without overriding persisted status", () => {
+    let phases = ingestNativePhase(new Map(), {
+      sessionId: "native-1", turnId: "turn-1", phase: "provider_request",
+    }, NOW);
+    const summaries = deriveLiveSessionSummary(
+      [session("native-1", "running", "2026-10-17T11:59:30Z")],
+      new Map(),
+      { nowMs: NOW + PROVIDER_FIRST_OUTPUT_ADVISORY_MS, nativePhases: phases }
+    );
+    expect(summaries.busy).toBe(1);
+    expect(summaries.quietSignals).toBe(1);
+    expect(summaries.rows[0]?.status).toBe("running");
+    expect(summaries.rows[0]?.quietWarning).toContain("90");
+
+    phases = ingestNativeProgress(phases, {
+      sessionId: "native-1", turnId: "turn-1", kind: "response_delta",
+    }, NOW + PROVIDER_FIRST_OUTPUT_ADVISORY_MS);
+    const progressed = deriveLiveSessionSummary(
+      [session("native-1", "running", "2026-10-17T11:59:30Z")],
+      new Map(),
+      { nowMs: NOW + PROVIDER_FIRST_OUTPUT_ADVISORY_MS + 1000, nativePhases: phases }
+    );
+    expect(progressed.quietSignals).toBe(0);
+    expect(progressed.rows[0]?.quietWarning).toBeNull();
+  });
+
+  it("does not warn for waiting user or terminal sessions", () => {
+    const phases = ingestNativePhase(new Map(), {
+      sessionId: "waiting", turnId: "turn-1", phase: "provider_request",
+    }, NOW);
+    const summary = deriveLiveSessionSummary(
+      [session("waiting", "waiting_for_user")], new Map(),
+      { nowMs: NOW + PROVIDER_FIRST_OUTPUT_ADVISORY_MS * 3, nativePhases: phases }
+    );
+    expect(summary.quietSignals).toBe(0);
+    expect(summary.rows[0]?.quietWarning).toBeNull();
   });
 
 });

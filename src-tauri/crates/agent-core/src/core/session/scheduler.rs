@@ -691,6 +691,37 @@ impl DialogScheduler {
     }
 }
 
+#[cfg(test)]
+mod worker_snapshot_tests {
+    use super::DialogScheduler;
+
+    #[tokio::test]
+    async fn snapshot_does_not_spawn_uninitialized_worker() {
+        let scheduler = DialogScheduler::new("snapshot-lazy", 4);
+        let observation = scheduler.worker_snapshot().await;
+        assert!(!observation.initialized);
+        assert!(!observation.terminated);
+        assert!(!observation.busy);
+        assert!(!observation.turn_processing);
+        assert_eq!(observation.pending, 0);
+        // Merely reading state should not create an inner handle.
+        assert!(scheduler.inner.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn snapshot_distinguishes_spawned_idle_from_unstarted_worker() {
+        let scheduler = DialogScheduler::new("snapshot-idle", 4);
+        let tx = scheduler.ensure_initialized().await;
+        let observation = scheduler.worker_snapshot().await;
+        assert!(observation.initialized);
+        assert!(!observation.terminated);
+        assert!(!observation.busy);
+        assert!(!observation.turn_processing);
+        assert_eq!(observation.pending, 0);
+        drop(tx);
+    }
+}
+
 // ============================================
 // Worker Task
 // ============================================

@@ -117,7 +117,7 @@ mod tests {
         totals.accumulate(state(true, false, false, false, 0));
         let value = serde_json::to_value(totals).unwrap();
         let map = value.as_object().unwrap();
-        assert_eq!(map.len(), 9);
+        assert_eq!(map.len(), 10);
         assert_eq!(map["initializedWorkers"], 1);
         assert!(!value.to_string().contains("sessionId"));
         assert!(!value.to_string().contains("turnIntentId"));

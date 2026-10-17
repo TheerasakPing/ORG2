@@ -9,6 +9,7 @@ on:
     branches:
       - integration/tp-agent-studio-develop
       - integration/tp-all-prs-release-candidate
+      - integration/tp-single-commit-beta
     paths:
       - .github/workflows/preview-installers.yml
 
@@ -50,7 +51,9 @@ jobs:
     env:
       CARGO_INCREMENTAL: "0"
       NODE_OPTIONS: --max-old-space-size=4096
-      ORGII_BUILD_KIND: preview
+      # Preview must use the intentionally non-updating local provenance.
+      # Rust build.rs allows only 'local' and 'release'; 'preview' panics.
+      ORGII_BUILD_KIND: local
       ORGII_BUILD_SHA: ${{ github.sha }}
       ORGII_BUILD_REF: ${{ github.ref_name }}
     steps:

@@ -1,0 +1,48 @@
+# Temporary maintenance workflow. Remove before merging into integration.
+name: Session Monitor Formatting Repair
+
+on:
+  push:
+    branches:
+      - feature/tp-live-session-monitor-v1
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: ${{ !contains(github.event.head_commit.message, '[skip autoformat]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: pnpm
+      - name: Install formatting dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Auto-fix changed frontend files only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin integration/tp-agent-studio-develop
+          mapfile -d '' files < <(
+            git diff --name-only --diff-filter=ACMR -z \
+              origin/integration/tp-agent-studio-develop...HEAD -- src |
+              grep -zE '\.(tsx?|jsx?)$' || true
+          )
+          if (("${#files[@]}" > 0)); then
+            pnpm exec eslint --fix --report-unused-disable-directives "${files[@]}"
+            git add -- "${files[@]}"
+          fi
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "style(session-monitor): apply ESLint and Prettier fixes [skip autoformat]"
+            git push origin HEAD:feature/tp-live-session-monitor-v1
+          fi

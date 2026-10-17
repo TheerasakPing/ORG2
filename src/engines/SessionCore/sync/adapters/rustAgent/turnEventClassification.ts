@@ -35,6 +35,8 @@ const TURN_NEUTRAL_EVENTS = new Set([
   "agent:file_change",
   "agent:setup_repo_update",
   "agent:heartbeat",
+  // Diagnostic warning; never assert running or create an EventStore row.
+  "agent:turn_watchdog",
   "agent:snapshot_created",
   "agent:computer_use_entered",
   "agent:computer_use_exited",

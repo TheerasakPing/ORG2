@@ -2,6 +2,10 @@
 >
 > This repository is a fork of [org2AI/ORG2](https://github.com/org2AI/ORG2).
 > Work-in-progress app identity: **TP Agent Studio** (provisional branding; legacy compatibility names remain in internal APIs).
+>
+> ![TP Agent Studio two-tone icon](assets/branding/tp-agent-studio.svg)
+>
+> Two-tone desktop branding details: [branding guide](docs/fork/TWO_TONE_BRANDING.md).
 > The download links below still point to the **upstream publisher**, not builds from this fork.
 > The fork's application updater is intentionally disabled pending independent signing and release infrastructure.
 > **Do not install experimental fork builds alongside upstream ORG2** until the app identity,

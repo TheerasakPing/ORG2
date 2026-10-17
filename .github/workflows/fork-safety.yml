@@ -22,3 +22,5 @@ jobs:
         run: node scripts/fork/check-identity.mjs
       - name: Verify JavaScript dev and numbered instance parity
         run: node --test scripts/tauri/instance-profile.test.cjs
+      - name: Validate packaged two-tone icons
+        run: node scripts/fork/check-icons.mjs

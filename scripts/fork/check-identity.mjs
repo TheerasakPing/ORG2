@@ -33,6 +33,12 @@ assert.ok(scopes.includes('$HOME/.tp-agent-studio/**'));
 assert.ok(scopes.includes('$HOME/.tp-agent-studio-dev/**'));
 assert.ok(!scopes.includes('$HOME/.orgii/**'));
 
+const nodeProfiles = read('scripts/tauri/instance-profile.cjs');
+assert.match(nodeProfiles, /const PRIMARY_IDE_PORT = 23847;/);
+assert.match(nodeProfiles, /const PRIMARY_PROXY_PORT = 27888;/);
+assert.match(nodeProfiles, /\.tp-agent-studio-dev/);
+assert.match(nodeProfiles, /com\.theerasakping\.tpagentstudio/);
+
 const runtime = read('src-tauri/src/runtime_instance.rs');
 assert.match(runtime, /const FORK_IDE_SERVER_PORT: u16 = 23_847;/);
 assert.match(runtime, /const FORK_CLI_PROXY_PORT: u16 = 27_888;/);

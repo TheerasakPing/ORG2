@@ -23,6 +23,24 @@ use std::sync::Mutex;
 
 /// Bumped by `notify_expected_escape`, decremented when we see an Escape.
 static EXPECTED_ESCAPES: AtomicU32 = AtomicU32::new(0);
+
+/// Consume an expected escape only when its counter is positive.
+/// The CAS loop avoids deprecated fetch_update on newer Rust toolchains.
+fn consume_expected_escape(counter: &AtomicU32) -> bool {
+    let mut value = counter.load(Ordering::SeqCst);
+    while value > 0 {
+        match counter.compare_exchange_weak(
+            value,
+            value - 1,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) => return true,
+            Err(actual) => value = actual,
+        }
+    }
+    false
+}
 /// Set once the tap thread has been spawned.
 static MONITOR_STARTED: AtomicBool = AtomicBool::new(false);
 /// Disables abort-on-escape while still counting Expected Escapes. Useful for
@@ -133,16 +151,7 @@ extern "C" fn escape_tap_callback(
     if is_synthetic {
         return event;
     }
-    if EXPECTED_ESCAPES
-        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
-            if n > 0 {
-                Some(n - 1)
-            } else {
-                None
-            }
-        })
-        .is_ok()
-    {
+    if consume_expected_escape(&EXPECTED_ESCAPES) {
         return event;
     }
 
@@ -189,5 +198,19 @@ fn run_event_tap() {
 
         CFRelease(source);
         CFRelease(tap);
+    }
+}
+
+#[cfg(test)]
+mod atomic_escape_tests {
+    use super::*;
+
+    #[test]
+    fn only_consumes_positive_expected_escape_count() {
+        let counter = AtomicU32::new(2);
+        assert!(consume_expected_escape(&counter));
+        assert!(consume_expected_escape(&counter));
+        assert!(!consume_expected_escape(&counter));
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
     }
 }

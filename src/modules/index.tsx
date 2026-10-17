@@ -61,6 +61,7 @@ import { useWorkspaceEvents } from "./hooks";
 import { useNarrowChatFocus } from "./useNarrowChatFocus";
 import { useOpenUrlInBrowser } from "./useOpenUrlInBrowser";
 import { useStationWindowBridge } from "./useStationWindowBridge";
+import { LiveSessionMonitorLauncher } from "@src/features/SessionHealth/LiveSessionMonitorLauncher";
 import { useWorkStationPipelineBridge } from "./useWorkStationPipelineBridge";
 
 const WorkStationPage = React.lazy(
@@ -368,6 +369,8 @@ const AppShell = () => {
               </div>
             </div>
           </AppLayout>
+          {/* On-demand multi-session status; no background transcript polling. */}
+          <LiveSessionMonitorLauncher />
           <React.Suspense fallback={null}>
             <GuideHighlightOverlay />
             <WikiHost />

@@ -220,6 +220,8 @@ pub struct EnqueueResult {
 /// Inner state initialized lazily on first enqueue.
 struct SchedulerInner {
     tx: mpsc::Sender<ScheduledMessage>,
+    /// Retain the worker handle to detect unexpected task termination.
+    worker: tokio::task::JoinHandle<()>,
 }
 
 /// Per-session FIFO message queue with a single background worker.
@@ -292,10 +294,57 @@ impl DialogScheduler {
     async fn ensure_initialized(&self) -> mpsc::Sender<ScheduledMessage> {
         let mut guard = self.inner.lock().await;
         if let Some(inner) = guard.as_ref() {
-            return inner.tx.clone();
+            if !inner.worker.is_finished() && !inner.tx.is_closed() {
+                return inner.tx.clone();
+            }
+
+            // A previous worker died (for example, from a panic outside the
+            // turn executor). Its receiver is gone, but the retained sender
+            // makes the scheduler appear initialized forever. Reset only the
+            // now-orphaned in-memory queue, never replay dropped tool effects.
+            warn!(
+                session_id = %self.session_id,
+                "[scheduler] worker terminated unexpectedly; replacing closed queue"
+            );
+            self.generation.fetch_add(1, Ordering::AcqRel);
+            self.pending.store(0, Ordering::Release);
+            let was_running_turn = self.processing_turn.swap(false, Ordering::AcqRel);
+            self.processing.store(false, Ordering::Release);
+            self.client_message_ids.lock().await.clear();
+            let interrupted = {
+                let mut control = self.turn_control.lock();
+                control.cancelled.clear();
+                control.current.take()
+            };
+            if let Some(ref turn_id) = interrupted {
+                crate::foundation::session_bridge::update_turn_intent_status(
+                    &self.session_id,
+                    turn_id,
+                    crate::foundation::session_bridge::TurnIntentBridgeStatus::Failed,
+                );
+            }
+            crate::foundation::session_bridge::mark_pending_turn_intents_stale(&self.session_id);
+            if was_running_turn {
+                if let Err(err) = crate::session::persistence::update_status(
+                    &self.session_id,
+                    crate::session::SessionStatus::Abandoned,
+                ) {
+                    warn!(
+                        session_id = %self.session_id,
+                        error = %err,
+                        "[scheduler] could not persist interrupted session status"
+                    );
+                }
+                let streaming_error = StreamingError::new(
+                    "Session worker stopped unexpectedly; the interrupted turn was not replayed. Send a new message to retry.".to_string(),
+                    classify_streaming_error_message("Session worker stopped unexpectedly"),
+                );
+                broadcast_agent_error_structured(&self.session_id, &streaming_error);
+            }
+            self.broadcast_queue_status();
         }
 
-        // First enqueue — spawn the worker now
+        // First enqueue or replace a dead worker — spawn a new receiver
         let (tx, rx) = mpsc::channel::<ScheduledMessage>(self.capacity);
 
         let worker = WorkerTask {
@@ -308,14 +357,17 @@ impl DialogScheduler {
             client_message_ids: Arc::clone(&self.client_message_ids),
             turn_control: Arc::clone(&self.turn_control),
         };
-        tokio::spawn(worker.run());
+        let worker = tokio::spawn(worker.run());
 
         info!(
             "[scheduler] Worker spawned for session={} (capacity={})",
             self.session_id, self.capacity
         );
 
-        *guard = Some(SchedulerInner { tx: tx.clone() });
+        *guard = Some(SchedulerInner {
+            tx: tx.clone(),
+            worker,
+        });
         tx
     }
 
@@ -597,8 +649,10 @@ impl WorkerTask {
             let client_message_id = msg.client_message_id.clone();
             let turn_intent_id = msg.turn_intent_id.clone();
             let org_run_id = msg.org_run_id.clone();
-            let execute_future = (msg.execute)();
-            let result = std::panic::AssertUnwindSafe(execute_future)
+            // The factory itself can panic before it returns a Future.
+            // Place its invocation INSIDE the catch boundary so an otherwise
+            // valid per-session worker cannot disappear with a live sender.
+            let result = std::panic::AssertUnwindSafe(async { (msg.execute)().await })
                 .catch_unwind()
                 .await
                 .unwrap_or_else(|panic_payload| {

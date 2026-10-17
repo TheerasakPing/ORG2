@@ -23,12 +23,23 @@ struct SearchBudget {
 struct Permit;
 impl Permit {
     fn acquire() -> Result<Self, String> {
-        WORKERS
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                (n < 4).then_some(n + 1)
-            })
-            .map(|_| Self)
-            .map_err(|_| "Search workers are busy; retry after pending searches finish".into())
+        // Preserve the project's MSRV across toolchains that have deprecated
+        // fetch_update, without sacrificing the four-worker admission limit.
+        let mut workers = WORKERS.load(Ordering::Acquire);
+        loop {
+            if workers >= 4 {
+                return Err("Search workers are busy; retry after pending searches finish".into());
+            }
+            match WORKERS.compare_exchange_weak(
+                workers,
+                workers + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Ok(Self),
+                Err(actual) => workers = actual,
+            }
+        }
     }
 }
 impl Drop for Permit {

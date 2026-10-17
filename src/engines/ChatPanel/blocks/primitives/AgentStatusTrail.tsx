@@ -54,6 +54,7 @@ import {
   resolveTrailElapsedMs,
   resolveTrailRestLabel,
 } from "@src/engines/ChatPanel/hooks/agentStatusTrailMath";
+import { useSessionWatchdogWarning } from "@src/engines/ChatPanel/hooks/useSessionWatchdogWarning";
 import { sessionByIdAtom } from "@src/store/session/sessionAtom";
 import { formatRelativeTime } from "@src/util/time/formatRelativeTime";
 import { startVisibilityAwareInterval } from "@src/util/time/scheduling/visibilityAwareInterval";
@@ -162,6 +163,7 @@ const AgentStatusTrail: React.FC<AgentStatusTrailProps> = ({
 }) => {
   const { t } = useTranslation("sessions");
   const isRunning = state.phase === "running";
+  const watchdog = useSessionWatchdogWarning(sessionId);
   const restLabel = resolveTrailRestLabel(state);
   const showsRefreshedAt =
     !isRunning && state.phase !== "asking" && restLabel === "lastRefreshed";
@@ -241,6 +243,15 @@ const AgentStatusTrail: React.FC<AgentStatusTrailProps> = ({
     if (restText) segments.push(restText);
   }
   if (activityText) segments.push(activityText);
+  if (isRunning && watchdog) {
+    // A long-running Future is not proof of a deadlock. Never offer an
+    // automatic Retry/Stop from this observation-only diagnostic.
+    segments.push(
+      t("planning.statusTrail.longRunning", {
+        minutes: Math.floor(watchdog.elapsedSeconds / 60),
+      })
+    );
+  }
 
   return (
     <div

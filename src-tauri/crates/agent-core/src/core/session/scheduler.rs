@@ -930,6 +930,9 @@ async fn reconcile_agent_org_run_after_terminal(run_id: &str) {
 }
 
 #[cfg(test)]
+mod stress_tests;
+
+#[cfg(test)]
 mod final_summary_tests;
 
 #[cfg(test)]

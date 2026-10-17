@@ -7,15 +7,15 @@ import {
   HIDDEN_AGENT_STATUS_TRAIL_STATE,
 } from "@src/engines/ChatPanel/hooks/agentStatusTrailMath";
 import {
+  clearAllSessionWatchdogWarnings,
+  recordSessionWatchdogWarning,
+} from "@src/engines/SessionCore/sync/sessionWatchdogWarnings";
+import {
   type SmokeRoot,
   createSmokeRoot,
   dispatch,
   settle,
 } from "@src/test/reactSmokeHarness";
-import {
-  clearAllSessionWatchdogWarnings,
-  recordSessionWatchdogWarning,
-} from "@src/engines/SessionCore/sync/sessionWatchdogWarnings";
 
 import AgentStatusTrail from "./AgentStatusTrail";
 import type { PlanningIndicatorMode } from "./chatActivityLabel";

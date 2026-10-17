@@ -193,20 +193,13 @@ Use ORG2's built-in Rust harness or launch these supported coding-agent CLIs fro
   <a href="https://pi.dev/docs/latest/providers"><kbd><img src="src/assets/modelIcons/pi.svg" alt="Pi logo" width="16" valign="middle" /> Pi</kbd></a>
 </p>
 
-## Download
+## Release availability
 
-Current build version: v2.0.8 (2026-09-23)
+Current source version: v2.0.8 (2026-09-23)
 
-Download the latest ORG2 desktop app with one click:
+**No independently signed TP Agent Studio installers are available yet.** This fork is being developed and tested separately from the original publisher. Builds will only be linked after macOS, Windows and Linux identity, migration, packaging and signature verification are complete.
 
-- [macOS Apple Silicon](https://github.com/org2AI/ORG2/releases/latest/download/ORG2-latest-mac-apple-silicon.dmg)
-- [Windows x64 installer](https://github.com/org2AI/ORG2/releases/latest/download/ORG2-latest-windows-x64-setup.exe)
-- [Windows x64 MSI](https://github.com/org2AI/ORG2/releases/latest/download/ORG2-latest-windows-x64.msi)
-- [Linux x64 AppImage](https://github.com/org2AI/ORG2/releases/latest/download/ORG2-latest-linux-x64.AppImage)
-- [Linux x64 DEB](https://github.com/org2AI/ORG2/releases/latest/download/ORG2-latest-linux-x64.deb)
-- [All latest release assets](https://github.com/org2AI/ORG2/releases/latest)
-
-The direct download links always resolve through GitHub's latest release pointer.
+See [Fork Engineering Guide](FORK.md) for current safety status. Do not mistake upstream installers for releases of this fork.
 
 ## Develop from source
 

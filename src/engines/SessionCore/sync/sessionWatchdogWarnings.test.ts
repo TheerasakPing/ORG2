@@ -27,7 +27,9 @@ describe("session-scoped watchdog diagnostic store", () => {
     const stopA = subscribeSessionWatchdogWarning("session-a", a);
     const stopB = subscribeSessionWatchdogWarning("session-b", b);
 
-    expect(recordSessionWatchdogWarning("session-a", warning("session-a", "turn-1"))).toBe(true);
+    expect(
+      recordSessionWatchdogWarning("session-a", warning("session-a", "turn-1"))
+    ).toBe(true);
     expect(getSessionWatchdogWarning("session-a")?.messageId).toBe("turn-1");
     expect(getSessionWatchdogWarning("session-b")).toBeNull();
     expect(a).toHaveBeenCalledTimes(1);

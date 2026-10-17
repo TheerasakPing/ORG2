@@ -6,6 +6,10 @@
 import { createLogger } from "@src/hooks/logger";
 
 import { noteSessionChannelActivity } from "../../sessionChannelActivity";
+import {
+  clearSessionWatchdogWarning,
+  recordSessionWatchdogWarning,
+} from "../../sessionWatchdogWarnings";
 import type {
   EventHandlerCallbacks,
   RawSessionEvent,
@@ -216,6 +220,27 @@ export function createRustAgentEventHandler({
         type: raw.type,
       } as unknown as AgentWSEvent;
 
+      // The scheduler emits this via the session IPC channel, not a
+      // window-wide Tauri event. Consume it before status/lifecycle
+      // classification: an observation must never start another Turn or
+      // be persisted as a transcript event.
+      if (event.type === "agent:turn_watchdog") {
+        recordSessionWatchdogWarning(sessionId, event);
+        return;
+      }
+      if (TERMINAL_EVENTS.has(event.type)) {
+        clearSessionWatchdogWarning(sessionId);
+      } else if (event.type === "agent:queue_status") {
+        if (event.isProcessing === false) {
+          clearSessionWatchdogWarning(sessionId);
+        } else if (
+          event.isProcessing === true &&
+          typeof event.currentMessageId === "string"
+        ) {
+          clearSessionWatchdogWarning(sessionId, event.currentMessageId);
+        }
+      }
+
       if (LIVE_STREAM_EVENTS_IGNORED_AFTER_STOP.has(event.type)) {
         noteSessionStreamingTurn(sessionId, event.turnId);
       }
@@ -343,6 +368,7 @@ export function createRustAgentEventHandler({
       _runningSignaled = false;
       _turnCompleted = false;
       _consecutiveDispatchFailures = 0;
+      clearSessionWatchdogWarning(sessionId);
       streamingController.set(false);
     },
 

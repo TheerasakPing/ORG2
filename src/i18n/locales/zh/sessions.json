@@ -2274,7 +2274,8 @@
       "runningTask_other": "{{count}} 个运行中的任务",
       "idle": "Agent 空闲中",
       "lastRefreshed": "上次刷新 {{value}}",
-      "asking": "等待你的回复"
+      "asking": "等待你的回复",
+      "longRunning": "已运行 {{minutes}} 分钟，可能仍在处理"
     }
   },
   "revertConfirm": {

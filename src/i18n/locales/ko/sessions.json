@@ -2275,7 +2275,8 @@
       "runningTask_other": "실행 중인 작업 {{count}}개",
       "idle": "Agent 대기 중",
       "lastRefreshed": "마지막 새로 고침 {{value}}",
-      "asking": "답변을 기다리는 중"
+      "asking": "답변을 기다리는 중",
+      "longRunning": "{{minutes}}분 경과 · 아직 작업 중일 수 있음"
     }
   },
   "revertConfirm": {

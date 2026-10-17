@@ -1045,7 +1045,8 @@
       "runningTask_other": "{{count}} tarefas em execução",
       "idle": "Agent inativo",
       "lastRefreshed": "Última atualização {{value}}",
-      "asking": "Aguardando sua resposta"
+      "asking": "Aguardando sua resposta",
+      "longRunning": "Em execução há {{minutes}} min; pode ainda estar ativo"
     }
   },
   "tools": {

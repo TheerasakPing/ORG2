@@ -2275,7 +2275,8 @@
       "runningTask_other": "{{count}} tác vụ đang chạy",
       "idle": "Agent đang rảnh",
       "lastRefreshed": "Làm mới lần cuối {{value}}",
-      "asking": "Đang chờ bạn trả lời"
+      "asking": "Đang chờ bạn trả lời",
+      "longRunning": "Đang chạy {{minutes}} phút; có thể vẫn xử lý"
     }
   },
   "revertConfirm": {

@@ -1045,7 +1045,8 @@
       "runningTask_other": "{{count}} चालू कार्य",
       "idle": "एजेंट निष्क्रिय है",
       "lastRefreshed": "अंतिम रीफ़्रेश {{value}}",
-      "asking": "आपके जवाब की प्रतीक्षा"
+      "asking": "आपके जवाब की प्रतीक्षा",
+      "longRunning": "{{minutes}} मिनट से चल रहा है; काम जारी हो सकता है"
     }
   },
   "tools": {

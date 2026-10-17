@@ -1045,7 +1045,8 @@
       "runningTask_other": "{{count}} running tasks",
       "idle": "Agent is idle",
       "lastRefreshed": "Last refreshed {{value}}",
-      "asking": "Waiting for your reply"
+      "asking": "Waiting for your reply",
+      "longRunning": "Long-running ({{minutes}} min; may still be working)"
     }
   },
   "tools": {

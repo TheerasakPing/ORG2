@@ -1045,7 +1045,8 @@
       "runningTask_other": "{{count}} tugas berjalan",
       "idle": "Agen sedang menganggur",
       "lastRefreshed": "Terakhir disegarkan {{value}}",
-      "asking": "Menunggu balasan Anda"
+      "asking": "Menunggu balasan Anda",
+      "longRunning": "Berjalan {{minutes}} menit; mungkin masih bekerja"
     }
   },
   "tools": {

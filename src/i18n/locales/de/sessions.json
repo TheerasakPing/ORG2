@@ -2275,7 +2275,8 @@
       "runningTask_other": "{{count}} laufende Aufgaben",
       "idle": "Agent ist inaktiv",
       "lastRefreshed": "Zuletzt aktualisiert {{value}}",
-      "asking": "Wartet auf deine Antwort"
+      "asking": "Wartet auf deine Antwort",
+      "longRunning": "Seit {{minutes}} Min. aktiv; möglicherweise noch beschäftigt"
     }
   },
   "revertConfirm": {

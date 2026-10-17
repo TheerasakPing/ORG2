@@ -2275,7 +2275,8 @@
       "runningTask_other": "{{count}} запущенных задач",
       "idle": "Agent не занят",
       "lastRefreshed": "Последнее обновление {{value}}",
-      "asking": "Ожидает вашего ответа"
+      "asking": "Ожидает вашего ответа",
+      "longRunning": "Выполняется {{minutes}} мин; возможно, работа продолжается"
     }
   },
   "revertConfirm": {

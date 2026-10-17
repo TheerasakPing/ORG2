@@ -1045,7 +1045,8 @@
       "runningTask_other": "{{count}} uruchomionych zadań",
       "idle": "Agent jest bezczynny",
       "lastRefreshed": "Ostatnio odświeżono {{value}}",
-      "asking": "Czeka na Twoją odpowiedź"
+      "asking": "Czeka na Twoją odpowiedź",
+      "longRunning": "Trwa {{minutes}} min; praca może nadal trwać"
     }
   },
   "tools": {

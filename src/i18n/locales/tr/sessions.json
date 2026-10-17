@@ -2275,7 +2275,8 @@
       "runningTask_other": "{{count}} çalışan görev",
       "idle": "Agent boşta",
       "lastRefreshed": "Son yenileme {{value}}",
-      "asking": "Yanıtınız bekleniyor"
+      "asking": "Yanıtınız bekleniyor",
+      "longRunning": "{{minutes}} dk sürüyor; hâlâ çalışıyor olabilir"
     }
   },
   "revertConfirm": {

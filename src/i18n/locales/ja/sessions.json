@@ -2275,7 +2275,8 @@
       "runningTask_other": "実行中のタスク {{count}} 件",
       "idle": "Agent は待機中",
       "lastRefreshed": "最終更新 {{value}}",
-      "asking": "返信を待っています"
+      "asking": "返信を待っています",
+      "longRunning": "{{minutes}} 分経過・処理が続いている可能性があります"
     }
   },
   "revertConfirm": {

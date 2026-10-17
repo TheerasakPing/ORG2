@@ -31,9 +31,8 @@ export function runtimeInstanceProfileForIdentifier(
     normalized.startsWith(`${FORK_IDENTIFIER}.`)
   ) {
     const forkDev = normalized === `${FORK_IDENTIFIER}.dev`;
-    const match = /^com\.theerasakping\.tpagentstudio\.(?:e2e\.)?instance(\d+)$/.exec(
-      normalized
-    );
+    const suffix = normalized.slice(FORK_IDENTIFIER.length);
+    const match = /^(?:\.e2e)?\.instance(\d+)$/.exec(suffix);
     const parsedId = match ? Number(match[1]) : 1;
     const instanceId = forkDev
       ? DEV_INSTANCE_ID

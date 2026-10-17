@@ -17,6 +17,7 @@
 - [x] Harden the explicit fork data-root guard against parent traversal, missing suffixes and symlinked ancestors; add focused Rust and fork-safety tests.
 - [x] Align fork frontend runtime ports and OAuth callback schemes with embedded Rust application identifiers; include production/dev/numbered/E2E parity tests (CI evidence pending).
 - [ ] **P0 Cloud ownership:** Fork defaults still reference the ORG2-managed Supabase/web backend and some Cloud parsers still accept only `orgii://` links. Configure fork-owned endpoints, secrets/credential namespaces and redirect allowlists; until then, prohibit real-account cloud onboarding and production distribution. See [Cloud boundary audit](FORK_CLOUD_BOUNDARY.md).
+- [x] Add an offline, fail-closed audit report for Cloud tenant, credential, endpoint and deep-link ownership plus strict custom endpoint-origin validation. The scanner is a **manual release preflight** until P0 backend work is complete; see [audit usage](CLOUD_BOUNDARY_AUDIT.md). This does not satisfy the Cloud ownership release gate.
 - [ ] Separate workspace-local `.orgii` metadata from upstream workspace metadata with opt-in migration, source-attributed ownership and rollback tests.
 - [ ] Run same-machine concurrent-install and migration/rollback tests.
 - [ ] Publish fork-built packages only after independent signing and end-to-end smoke tests.

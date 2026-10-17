@@ -80,11 +80,17 @@ mod tests {
         }
         assert!(!needs_named_executable(
             DEV_IDENTIFIER,
+            Path::new("/build/debug/TP Agent Studio Dev")
+        ));
+        // The upstream process name is NOT the fork's dev process name.
+        // Otherwise a renamed fork could keep showing an upstream Dock title.
+        assert!(needs_named_executable(
+            DEV_IDENTIFIER,
             Path::new("/build/debug/ORG2 Dev")
         ));
         assert!(!needs_named_executable(
             DEV_IDENTIFIER,
-            Path::new("/build/ORG2 Dev.app/Contents/MacOS/org2")
+            Path::new("/build/TP Agent Studio Dev.app/Contents/MacOS/org2")
         ));
     }
 

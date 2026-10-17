@@ -25,8 +25,9 @@ The display aggregates already-known local/CLI sessions:
   provider/tool progress heartbeat. A genuinely running agent may have no
   persisted row updates, and a stuck agent can have frequent unrelated writes.
 - Only loaded roster rows are shown. The monitor does **not** claim to have
-  enumerated every historical or attached process; it excludes read-only/cloud
-  imported replay copies from actionable local runtime counts.
+  enumerated every historical or attached process. Cloud-imported replay
+  copies are excluded; local read-only CLI history appears only when a live
+  hook with the matching session ID is available.
 - **Refresh** explicitly requests the existing single-flight
   `loadSessionRoster({ forceRefresh: true })`. No new backend polling loop,
   new endpoint, channel subscription or periodic roster reload is introduced.

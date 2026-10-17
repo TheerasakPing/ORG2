@@ -42,6 +42,7 @@
 
 - [ ] Define a shared session identity/event provenance contract for native Rust Harness and external CLI sessions.
 - [ ] Preserve multi-agent task/call provenance across replay, forks, and resume.
+- [x] Provide a private, bilingual offline Session Health HTML snapshot from SQLite aggregate status counts; this is not live agent activity or a native app tab. See [Session Health Dashboard](SESSION_HEALTH_DASHBOARD.md).
 - [ ] Build a unified runtime dashboard: tokens, costs, tool latency, retry reason, memory queue, session CPU/RAM, pending approvals.
 - [ ] Add permissions preview and audit receipts for CLI, MCP, desktop and browser execution.
 - [ ] Improve agent-team orchestration with role capabilities, checkpoints, budgets and human approval rules.

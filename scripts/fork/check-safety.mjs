@@ -22,11 +22,12 @@ assert.match(rust, /pub async fn check_app_update\([\s\S]*?require_fork_updater_
   'Custom check_app_update path must enforce fork update guard');
 assert.match(readme, /Independent community fork/);
 const upstreamRelease = read('.github/workflows/release.yaml');
+const releaseLines = upstreamRelease.split('\n');
 for (const job of ['build-and-release', 'build-windows', 'build-linux']) {
-  const anchor = upstreamRelease.indexOf('  ' + job + ':\\n');
+  const anchor = releaseLines.findIndex((line) => line === '  ' + job + ':');
   assert.notEqual(anchor, -1, 'Missing release job: ' + job);
-  const next = upstreamRelease.slice(anchor, anchor + 390);
-  assert.match(next, /if: \\${{ github\\.repository == 'org2AI\\/ORG2' }}/,
+  const block = releaseLines.slice(anchor, anchor + 8).join('\n');
+  assert.ok(block.includes("if: ${{ github.repository == 'org2AI/ORG2' }}"),
     'Inherited upstream release job must be disabled in fork: ' + job);
 }
 process.stdout.write('Fork release-safety checks passed. Independent installation is not yet validated.\n');

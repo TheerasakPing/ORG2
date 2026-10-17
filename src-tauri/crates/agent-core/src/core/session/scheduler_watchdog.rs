@@ -82,11 +82,23 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn no_warning_on_completion_at_exact_warning_boundary() {
+    async fn completed_work_does_not_leave_delayed_warning() {
         let mut calls = 0;
         let result = observe_long_running(async { 1 }, |_, _| calls += 1).await;
         assert_eq!(result, 1);
         tokio::time::advance(FIRST_WARNING_AFTER).await;
+        assert_eq!(calls, 0);
+    }
+
+    #[tokio::test]
+    async fn preserves_provider_error_without_retry_or_status_mutation() {
+        let mut calls = 0;
+        let result = observe_long_running(
+            async { Err::<(), _>("provider unavailable") },
+            |_, _| calls += 1,
+        )
+        .await;
+        assert_eq!(result, Err("provider unavailable"));
         assert_eq!(calls, 0);
     }
 }

@@ -15,6 +15,14 @@ import {
 } from "./liveSessionMonitorModel";
 import { countQuietSessions, phaseAdvisory } from "./sessionStallAdvisory";
 import {
+  countSchedulerPulseHealth,
+  ingestSchedulerPulse,
+  schedulerPulseHealth,
+  schedulerPulseMessage,
+  SCHEDULER_HEARTBEAT_EVENT,
+  type SchedulerPulseMap,
+} from "./schedulerHeartbeat";
+import {
   clearNativePhase,
   ingestNativePhase,
   NATIVE_PHASE_EVENT,
@@ -45,7 +53,12 @@ const STATUS_LABELS: Record<string, string> = {
   archived: "เก็บแล้ว / Archived",
 };
 
-function StatusRow({ row, caution }: { row: LiveSessionRow; caution: string | null }) {
+function StatusRow({ row, caution, workerPulseNote, workerPulseAlert }: {
+  row: LiveSessionRow;
+  caution: string | null;
+  workerPulseNote: string | null;
+  workerPulseAlert: boolean;
+}) {
   const color = row.phase === "working"
     ? "bg-cyan-500"
     : row.phase === "attention"
@@ -64,6 +77,7 @@ function StatusRow({ row, caution }: { row: LiveSessionRow; caution: string | nu
           <p className="text-xs text-text-2">{STATUS_LABELS[row.status] ?? "ไม่ทราบสถานะ / Unknown"}</p>
           <p className="mt-1 break-words text-[11px] text-text-3">{row.detail}</p>
           {caution && <p className="mt-1 text-[11px] text-amber-600">{caution}</p>}
+          {workerPulseNote && <p className={`mt-1 text-[11px] ${workerPulseAlert ? "text-amber-600" : "text-text-3"}`}>{workerPulseNote}</p>}
           {row.oldPersistedStatus && (
             <p className="mt-1 text-[11px] text-amber-600">
               ข้อมูลสถานะในฐานข้อมูลเก่ากว่า 10 นาที · ตรวจสอบเพิ่มเติม
@@ -83,10 +97,14 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
   const [nativePhases, setNativePhases] = useState<NativePhaseMap>(() => new Map());
+  const [schedulerPulses, setSchedulerPulses] = useState<SchedulerPulseMap>(() => new Map());
 
-  // Three low-volume Tauri event subscriptions only while expanded.
+  // Four low-volume Tauri event subscriptions only while expanded.
   // Payloads are validated and minimized before state ingestion. Never
   // subscribe to high-frequency message or thinking delta streams here.
+  useTauriListen<unknown>(SCHEDULER_HEARTBEAT_EVENT, (payload) => {
+    setSchedulerPulses((previous) => ingestSchedulerPulse(previous, payload));
+  });
   useTauriListen<unknown>(NATIVE_PHASE_EVENT, (payload) => {
     setNativePhases((previous) => ingestNativePhase(previous, payload));
   });
@@ -124,6 +142,13 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
       .map((row) => row.id);
     return countQuietSessions(activeNativeIds, nativePhases, nowMs);
   }, [summary.rows, nativePhases, nowMs]);
+
+  const workerPulseCounts = useMemo(() => {
+    const localActiveIds = summary.rows
+      .filter((row) => row.phase === "working" && row.source !== "cli-hook")
+      .map((row) => row.id);
+    return countSchedulerPulseHealth(localActiveIds, schedulerPulses, nowMs);
+  }, [summary.rows, schedulerPulses, nowMs]);
 
   const refresh = async () => {
     if (refreshing) return;
@@ -176,6 +201,11 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
           Phase silence: {quietCounts.quiet} quiet ≥5m · {quietCounts.expired} old ≥60m
           {" · "}Only {quietCounts.observed} observed native turns
         </p>
+        <p className="mt-1 text-[11px] text-text-3" data-testid="session-monitor-worker-heartbeat-summary">
+          Scheduler heartbeat: {workerPulseCounts.recent} recent · {workerPulseCounts.late} late ≥45s
+          {" · "}{workerPulseCounts.missing} missing ≥2m
+          {" · "}{workerPulseCounts.unknown} unobserved
+        </p>
         <div className="mt-3 flex items-center justify-between gap-2 text-xs">
           <label className="flex items-center gap-2 text-text-2">
             <input type="checkbox" checked={activeOnly}
@@ -205,7 +235,17 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
                 ? phaseAdvisory(row.id, nativePhases, nowMs) : null;
               const caution = advisory?.state === "quiet" || advisory?.state === "expired"
                 ? advisory.message : null;
-              return <StatusRow row={row} caution={caution} key={row.id} />;
+              const pulse = row.phase === "working" && row.source !== "cli-hook"
+                ? schedulerPulseHealth(schedulerPulses.get(row.id), nowMs) : "unknown";
+              const workerPulseNote = pulse === "unknown"
+                ? null : schedulerPulseMessage(pulse);
+              return <StatusRow
+                row={row}
+                caution={caution}
+                workerPulseNote={workerPulseNote}
+                workerPulseAlert={pulse === "late" || pulse === "missing"}
+                key={row.id}
+              />;
             })}
           </ul>
         ) : (
@@ -215,7 +255,7 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
         )}
       </div>
       <footer className="shrink-0 border-t border-border-1 px-4 py-3 text-[11px] text-text-3">
-        <p>Live updates จาก Rust Provider/Tool boundary และ CLI Hook · ไม่โหลด Transcript อัตโนมัติ</p>
+        <p>Live updates จาก Rust Phase + Scheduler Worker และ CLI Hook · ไม่โหลด Transcript อัตโนมัติ</p>
         <p>“ข้อมูลเก่า” = เวลาบันทึกสถานะเก่า ไม่ใช่หลักฐานว่า Provider/Tool ค้าง</p>
       </footer>
     </section>

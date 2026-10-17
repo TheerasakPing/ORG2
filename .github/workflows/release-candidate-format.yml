@@ -1,0 +1,62 @@
+# One-shot formatting of the isolated TP Agent Studio release-candidate branch.
+# Triggered only when this workflow file is added/edited on that exact branch.
+# It is not a replacement for strict CI; normal required checks still run.
+name: TP Release Candidate Format
+
+on:
+  push:
+    branches:
+      - integration/tp-all-prs-release-candidate
+    paths:
+      - .github/workflows/release-candidate-format.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tp-release-candidate-format-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    if: github.repository == 'TheerasakPing/ORG2' && github.ref == 'refs/heads/integration/tp-all-prs-release-candidate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate branch
+        uses: actions/checkout@v6
+        with:
+          ref: integration/tp-all-prs-release-candidate
+          fetch-depth: 1
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Auto-fix only reviewed release-candidate files
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            src/api/tauri/rpc/schemas/sessionAggregate.ts
+            src/features/SessionHealth/LiveSessionMonitorPanel.tsx
+            src/features/SessionHealth/NativeWorkerOverviewSection.tsx
+            src/features/SessionHealth/nativeWorkerOverview.test.ts
+            src/features/SessionHealth/schedulerHeartbeat.test.ts
+            src/features/SessionHealth/schedulerHeartbeat.ts
+            src/features/SessionHealth/sessionStallAdvisory.test.ts
+            src/features/SessionHealth/sessionStallAdvisory.ts
+            src/features/SessionHealth/useNativeWorkerOverview.ts
+          )
+          pnpm exec eslint --fix --max-warnings 0 "${files[@]}"
+          pnpm exec eslint --max-warnings 0 "${files[@]}"
+          git diff --check
+          git add -- "${files[@]}"
+          if ! git diff --cached --quiet; then
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'style(frontend): apply ESLint and Prettier fixes to consolidated monitor'
+            git push origin HEAD:refs/heads/integration/tp-all-prs-release-candidate
+          fi

@@ -26,9 +26,12 @@ export function runtimeInstanceProfileForIdentifier(
   // src-tauri/src/runtime_instance.rs and scripts/tauri/instance-profile.cjs.
   // Unknown fork subidentifiers fail back to the FORK primary identity rather
   // than accidentally selecting the upstream orgii:// / 13xxx endpoints.
-  if (normalized === FORK_IDENTIFIER || normalized.startsWith(`${FORK_IDENTIFIER}.`)) {
+  if (
+    normalized === FORK_IDENTIFIER ||
+    normalized.startsWith(`${FORK_IDENTIFIER}.`)
+  ) {
     const forkDev = normalized === `${FORK_IDENTIFIER}.dev`;
-    const match = /^com\\.theerasakping\\.tpagentstudio\\.(?:e2e\\.)?instance(\\d+)$/.exec(
+    const match = /^com\.theerasakping\.tpagentstudio\.(?:e2e\.)?instance(\d+)$/.exec(
       normalized
     );
     const parsedId = match ? Number(match[1]) : 1;

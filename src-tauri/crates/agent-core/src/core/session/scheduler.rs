@@ -985,6 +985,61 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
+    async fn failed_executor_reconciles_persisted_running_session() {
+        use crate::session::persistence::{self, UnifiedSessionRecord};
+        use core_types::key_source::KeySource;
+
+        let _sandbox = test_helpers::test_env::sandbox();
+        let session_id = "session-failed-executor-status";
+        {
+            let conn = database::db::get_connection().expect("test DB");
+            crate::persistence::test_schema::ensure_agent_sessions_schema(&conn);
+            persistence::init(&conn).expect("session tables");
+        }
+        let record = UnifiedSessionRecord {
+            session_id: session_id.to_string(),
+            name: "status regression".to_string(),
+            status: crate::session::SessionStatus::Running.as_str().to_string(),
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            session_type: "sde".to_string(),
+            key_source: KeySource::OwnKey,
+            ..Default::default()
+        };
+        persistence::upsert_session(&record).expect("seed running session");
+
+        let scheduler = DialogScheduler::new(session_id, 8);
+        scheduler
+            .enqueue(ScheduledMessage {
+                kind: ScheduledKind::Turn,
+                message_id: "failing-turn".into(),
+                generation: 0,
+                client_message_id: None,
+                turn_intent_id: String::new(),
+                org_run_id: None,
+                content: "fail".into(),
+                execute: Box::new(|| Box::pin(async { Err("provider failed".to_string()) })),
+            })
+            .await
+            .expect("enqueue");
+
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                if persistence::get_session(session_id)
+                    .expect("query session")
+                    .is_some_and(|row| row.status == crate::session::SessionStatus::Failed.as_str())
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("failed callback must clear durable running status");
+    }
+
+    #[tokio::test]
     async fn a_dead_worker_is_recreated_on_the_next_enqueue() {
         let scheduler = DialogScheduler::new("session-aborted-worker", 8);
         scheduler.ensure_initialized().await;

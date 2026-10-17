@@ -56,7 +56,7 @@ impl RuntimeInstanceProfile {
         let upstream = user_home.join(".orgii");
         let configured_real = configured.canonicalize().unwrap_or_else(|_| configured.to_path_buf());
         let upstream_real = upstream.canonicalize().unwrap_or(upstream);
-        if configured_real == upstream_real {
+        if configured_real.starts_with(&upstream_real) {
             return Err("Fork data root must not point to the upstream ORG2 profile");
         }
         Ok(())

@@ -49,6 +49,9 @@ use super::turn::streaming::{
 };
 use crate::bus::broadcast_event;
 
+#[path = "scheduler_watchdog.rs"]
+mod scheduler_watchdog;
+
 // ============================================
 // Scheduled Message
 // ============================================
@@ -653,10 +656,38 @@ impl WorkerTask {
             // Place its invocation INSIDE the catch boundary so an otherwise
             // valid per-session worker cannot disappear with a live sender.
             let execute = msg.execute;
-            let result = std::panic::AssertUnwindSafe(async move { execute().await })
-                .catch_unwind()
-                .await
-                .unwrap_or_else(|panic_payload| {
+            let execution = std::panic::AssertUnwindSafe(async move { execute().await })
+                .catch_unwind();
+            // A pending provider/tool Future may be slow or truly stuck.
+            // Observe elapsed time without changing its lifecycle: timeouts
+            // cannot safely detach or automatically replay side-effectful tools.
+            let result = scheduler_watchdog::observe_long_running(
+                execution,
+                |elapsed, warning_count| {
+                    warn!(
+                        session_id = %self.session_id,
+                        message_id = %msg.message_id,
+                        kind = ?msg.kind,
+                        elapsed_secs = elapsed.as_secs(),
+                        warning_count,
+                        "[scheduler] long-running job (observation only; no automatic cancellation)"
+                    );
+                    if is_turn {
+                        broadcast_event(
+                            "agent:turn_watchdog",
+                            serde_json::json!({
+                                "sessionId": self.session_id,
+                                "messageId": msg.message_id,
+                                "elapsedSeconds": elapsed.as_secs(),
+                                "warningCount": warning_count,
+                                "observeOnly": true,
+                            }),
+                        );
+                    }
+                },
+            )
+            .await
+            .unwrap_or_else(|panic_payload| {
                     let panic_message = panic_payload_to_string(panic_payload.as_ref());
                     error!(
                         "[scheduler] Turn executor panicked for session {} message {}: {}",

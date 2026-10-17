@@ -45,6 +45,11 @@ assert.match(runtime, /const FORK_CLI_PROXY_PORT: u16 = 27_888;/);
 assert.match(runtime, /\.tp-agent-studio-dev/);
 assert.match(runtime, /\.tp-agent-studio-instance/);
 assert.match(runtime, /validate_explicit_home/);
+assert.match(runtime, /resolve_profile_candidate/);
+assert.match(runtime, /symlink_metadata/);
+assert.match(runtime, /profile_path_contains/);
+assert.match(runtime, /rejects_missing_suffix_and_parent_traversal_into_upstream_data/);
+assert.match(runtime, /rejects_symlinked_parent_into_upstream_profile/);
 
 const bootstrap = read('src-tauri/src/app/bootstrap.rs');
 assert.match(bootstrap, /runtime_profile\.is_fork\(\)/);

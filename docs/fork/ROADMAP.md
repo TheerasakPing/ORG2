@@ -20,7 +20,7 @@
 
 ## P1 — Reliability and security
 
-- [x] Replace the production auto-dream acquisition path with a stable OS-level exclusive file lease, plus same-process 8-contender tests and portable rollback.
+- [x] Replace the production auto-dream acquisition path with a stable OS-level exclusive file lease, plus eight-contender, cross-process exclusion tests and portable rollback.
 - [ ] Add multi-process crash/kill/restart, Windows/macOS/Linux lock test evidence and split committed timestamp from in-progress state.
 - [ ] Add sandbox profiles for untrusted agent shell commands; separate read/write paths, environment secrets, network and process limits.
 - [ ] Introduce versioned, transactional SQLite migrations with verification and recovery procedures.

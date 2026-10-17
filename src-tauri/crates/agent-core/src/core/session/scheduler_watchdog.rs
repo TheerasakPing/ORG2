@@ -62,7 +62,12 @@ mod tests {
                     finish_rx.await.expect("work must not be cancelled by observation");
                     42
                 },
-                move |elapsed, count| reports_copy.lock().unwrap().push((elapsed.as_secs(), count)),
+                move |elapsed, count| {
+                    reports_copy
+                        .lock()
+                        .unwrap()
+                        .push((elapsed.as_secs(), count));
+                },
             )
             .await
         });

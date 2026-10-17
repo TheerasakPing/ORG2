@@ -6,7 +6,10 @@
 export const NATIVE_PHASE_EVENT = "agent:monitor_phase";
 export const MAX_NATIVE_PHASE_RECORDS = 128;
 
-export type NativePhase = "provider_request" | "tool_executing" | "tool_finished";
+export type NativePhase =
+  | "provider_request"
+  | "tool_executing"
+  | "tool_finished";
 export interface NativePhaseObservation {
   turnId: string | null;
   phase: NativePhase;
@@ -57,10 +60,12 @@ export function ingestNativePhase(
   // The Rust handler owns an execution-generation guard, but still defend
   // against a delayed completion from the last turn on the client.
   if (
-    previous?.turnId && turnId &&
+    previous?.turnId &&
+    turnId &&
     previous.turnId !== turnId &&
     phase === "tool_finished"
-  ) return current;
+  )
+    return current;
   const next = new Map(current);
   next.delete(id);
   next.set(id, {
@@ -94,7 +99,10 @@ export function clearNativePhase(
   return next;
 }
 
-export function nativePhaseDescription(phase: NativePhase, tool: string | null): string {
+export function nativePhaseDescription(
+  phase: NativePhase,
+  tool: string | null
+): string {
   switch (phase) {
     case "provider_request":
       return "Rust: entered provider request · รอผลจากโมเดล (ยังไม่ใช่ heartbeat)";

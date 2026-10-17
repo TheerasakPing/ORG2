@@ -1,6 +1,7 @@
 > **Independent community fork — TheerasakPing/ORG2**
 >
 > This repository is a fork of [org2AI/ORG2](https://github.com/org2AI/ORG2).
+> Work-in-progress app identity: **TP Agent Studio** (provisional branding; ORGII remains in internal APIs and compatibility code).
 > The download links below still point to the **upstream publisher**, not builds from this fork.
 > The fork's application updater is intentionally disabled pending independent signing and release infrastructure.
 > **Do not install experimental fork builds alongside upstream ORG2** until the app identity,

@@ -35,12 +35,17 @@ export function ingestSchedulerPulse(
   payload: unknown,
   nowMs = Date.now()
 ): SchedulerPulseMap {
-  if (!isRecord(payload) || !validId(payload.sessionId)
-    || !validId(payload.turnIntentId)
-    || !safeNumber(payload.epoch) || payload.epoch === 0
-    || !safeNumber(payload.sequence)
-    || (payload.state !== "alive" && payload.state !== "finished")
-    || !Number.isFinite(nowMs) || nowMs < 0) {
+  if (
+    !isRecord(payload) ||
+    !validId(payload.sessionId) ||
+    !validId(payload.turnIntentId) ||
+    !safeNumber(payload.epoch) ||
+    payload.epoch === 0 ||
+    !safeNumber(payload.sequence) ||
+    (payload.state !== "alive" && payload.state !== "finished") ||
+    !Number.isFinite(nowMs) ||
+    nowMs < 0
+  ) {
     return current;
   }
   const previous = current.get(payload.sessionId);
@@ -51,7 +56,10 @@ export function ingestSchedulerPulse(
       if (payload.sequence < previous.sequence) return current;
       if (previous.state === "finished") return current;
       // Replayed or duplicated events do not create false clock progress.
-      if (previous.state === payload.state && previous.sequence === payload.sequence) {
+      if (
+        previous.state === payload.state &&
+        previous.sequence === payload.sequence
+      ) {
         return current;
       }
     }
@@ -82,8 +90,13 @@ export function schedulerPulseHealth(
   pulse: SchedulerPulse | undefined,
   nowMs: number
 ): SchedulerPulseHealth {
-  if (!pulse || pulse.state !== "alive" ||
-    !Number.isFinite(nowMs) || nowMs < pulse.observedAtMs) return "unknown";
+  if (
+    !pulse ||
+    pulse.state !== "alive" ||
+    !Number.isFinite(nowMs) ||
+    nowMs < pulse.observedAtMs
+  )
+    return "unknown";
   const lagMs = nowMs - pulse.observedAtMs;
   if (lagMs >= SCHEDULER_HEARTBEAT_MISSING_MS) return "missing";
   if (lagMs >= SCHEDULER_HEARTBEAT_LATE_MS) return "late";
@@ -102,7 +115,9 @@ export function countSchedulerPulseHealth(
   return counts;
 }
 
-export function schedulerPulseMessage(health: SchedulerPulseHealth): string | null {
+export function schedulerPulseMessage(
+  health: SchedulerPulseHealth
+): string | null {
   switch (health) {
     case "recent":
       return "Scheduler heartbeat ล่าสุด · ยืนยันเพียง Worker ถูก Poll ไม่ใช่ Provider คืบหน้า";

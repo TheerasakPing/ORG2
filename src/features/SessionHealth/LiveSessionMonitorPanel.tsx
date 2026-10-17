@@ -9,20 +9,11 @@ import { useTauriListen } from "@src/hooks/platform/useTauriListen";
 import { loadSessionRoster, sessionsAtom } from "@src/store/session";
 import { agentLiveStatusAtom } from "@src/store/session/agentLiveStatusAtom";
 
+import { NativeWorkerOverviewSection } from "./NativeWorkerOverviewSection";
 import {
   type LiveSessionRow,
   deriveLiveSessionSummary,
 } from "./liveSessionMonitorModel";
-import { NativeWorkerOverviewSection } from "./NativeWorkerOverviewSection";
-import { countQuietSessions, phaseAdvisory } from "./sessionStallAdvisory";
-import {
-  SCHEDULER_HEARTBEAT_EVENT,
-  type SchedulerPulseMap,
-  countSchedulerPulseHealth,
-  ingestSchedulerPulse,
-  schedulerPulseHealth,
-  schedulerPulseMessage,
-} from "./schedulerHeartbeat";
 import {
   NATIVE_PHASE_EVENT,
   NATIVE_PROGRESS_EVENT,
@@ -31,6 +22,15 @@ import {
   ingestNativePhase,
   ingestNativeProgress,
 } from "./nativePhaseEvents";
+import {
+  SCHEDULER_HEARTBEAT_EVENT,
+  type SchedulerPulseMap,
+  countSchedulerPulseHealth,
+  ingestSchedulerPulse,
+  schedulerPulseHealth,
+  schedulerPulseMessage,
+} from "./schedulerHeartbeat";
+import { countQuietSessions, phaseAdvisory } from "./sessionStallAdvisory";
 
 interface LiveSessionMonitorPanelProps {
   onClose: () => void;
@@ -265,7 +265,8 @@ export default function LiveSessionMonitorPanel({
           className="mt-2 text-[11px] text-text-3"
           data-testid="session-monitor-silence-summary"
         >
-          Phase silence: {quietCounts.quiet} quiet ≥5m · {quietCounts.expired} old ≥60m
+          Phase silence: {quietCounts.quiet} quiet ≥5m · {quietCounts.expired}{" "}
+          old ≥60m
           {" · "}Only {quietCounts.observed} observed native turns
         </p>
         <p

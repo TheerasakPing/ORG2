@@ -26,7 +26,8 @@ export function useNativeWorkerOverview(): {
     if (inFlight.current) return inFlight.current;
     const epoch = generation.current;
     setIsLoading(true);
-    const request = rpc.sessionAggregate.workerOverview()
+    const request = rpc.sessionAggregate
+      .workerOverview()
       .then((snapshot) => {
         if (epoch !== generation.current) return;
         setOverview(snapshot);

@@ -56,6 +56,62 @@ use core_types::session_event::SessionEvent;
 
 use super::super::persistence as unified_persistence;
 
+/// Deliberately small, content-free turn activity signal for diagnostics.
+/// A phase change is NOT a heartbeat and must never be treated as proof that
+/// the provider or tool future is making progress.
+fn monitor_phase_payload(
+    session_id: &str,
+    turn_id: Option<&str>,
+    phase: &'static str,
+    tool_name: Option<&str>,
+) -> serde_json::Value {
+    // Refuse arbitrary tool labels (including multiline / path / arguments).
+    // The frontend still validates this name independently.
+    let safe_tool = tool_name.filter(|name| {
+        !name.is_empty()
+            && name.len() <= 48
+            && name.as_bytes()[0].is_ascii_alphabetic()
+            && name.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'/' | b'-')
+            })
+    });
+    serde_json::json!({
+        "sessionId": session_id,
+        "turnId": turn_id,
+        "phase": phase,
+        "tool": safe_tool,
+    })
+}
+
+#[cfg(test)]
+mod monitor_phase_payload_tests {
+    use super::monitor_phase_payload;
+
+    #[test]
+    fn emits_only_bounded_phase_metadata_without_user_content() {
+        let payload = monitor_phase_payload(
+            "test-session",
+            Some("turn-1"),
+            "tool_executing",
+            Some("functions.exec"),
+        );
+        assert_eq!(payload["sessionId"], "test-session");
+        assert_eq!(payload["turnId"], "turn-1");
+        assert_eq!(payload["phase"], "tool_executing");
+        assert_eq!(payload["tool"], "functions.exec");
+        assert_eq!(payload.as_object().unwrap().len(), 4);
+        assert!(!payload.to_string().contains("args"));
+    }
+
+    #[test]
+    fn rejects_tool_names_that_could_expose_private_arguments() {
+        for unsafe_name in ["Read SECRET=token", "/absolute/path", "foo\\npassword", "🙈"] {
+            let payload = monitor_phase_payload("s", None, "tool_executing", Some(unsafe_name));
+            assert!(payload["tool"].is_null());
+        }
+    }
+}
+
 fn tool_result_is_error(result: &str) -> bool {
     if result.starts_with("Error") {
         return true;
@@ -928,6 +984,19 @@ impl TurnEventHandler for UnifiedEventHandler {
         session_id: &str,
         messages: &[Value],
     ) -> Result<(), String> {
+        // This marks entry into the provider-request boundary. It does not
+        // serialize messages, prompts or credentials and cannot certify liveness.
+        if !self.is_cancelled() && self.is_current_turn_generation() {
+            self.broadcast_session_surface(
+                "agent:monitor_phase",
+                monitor_phase_payload(
+                    session_id,
+                    self.config.turn_id.as_deref(),
+                    "provider_request",
+                    None,
+                ),
+            );
+        }
         let Some(turn_intent_id) = self.config.agent_org_turn_intent_id.clone() else {
             return Ok(());
         };
@@ -1277,6 +1346,17 @@ impl TurnEventHandler for UnifiedEventHandler {
             ui_metadata,
         );
         self.push_to_store(session_id, event);
+        if !self.is_cancelled() && self.is_current_turn_generation() {
+            self.broadcast_session_surface(
+                "agent:monitor_phase",
+                monitor_phase_payload(
+                    session_id,
+                    self.config.turn_id.as_deref(),
+                    "tool_finished",
+                    Some(tool_name),
+                ),
+            );
+        }
 
         let preview: String = crate::utils::safe_truncate_chars_to_string(&result, 4000);
         self.broadcast_session_surface(
@@ -1391,9 +1471,21 @@ impl TurnEventHandler for UnifiedEventHandler {
         tool_name: &str,
         args: &Value,
     ) {
-        if self.is_cancelled() {
+        if self.is_cancelled() || !self.is_current_turn_generation() {
             return;
         }
+
+        // Emit only once execution reaches the tool boundary; a model's
+        // tool_call proposal alone is NOT tool execution.
+        self.broadcast_session_surface(
+            "agent:monitor_phase",
+            monitor_phase_payload(
+                session_id,
+                self.config.turn_id.as_deref(),
+                "tool_executing",
+                Some(tool_name),
+            ),
+        );
 
         snapshots::take_snapshot(
             self.config.workspace_path.as_deref(),

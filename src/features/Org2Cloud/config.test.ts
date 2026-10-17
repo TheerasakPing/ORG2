@@ -90,18 +90,18 @@ describe("buildCloudAuthCallbackUrl", () => {
     expect(
       configureCloudAuthCallbackForIdentifier("com.theerasakping.tpagentstudio")
     ).toBe("tpagentstudio://auth/callback");
-    expect(new URL(buildOrg2CloudLoginUrl()).searchParams.get("return_to")).toBe(
-      "tpagentstudio://auth/callback"
-    );
+    expect(
+      new URL(buildOrg2CloudLoginUrl()).searchParams.get("return_to")
+    ).toBe("tpagentstudio://auth/callback");
 
     expect(
       configureCloudAuthCallbackForIdentifier(
         "com.theerasakping.tpagentstudio.dev"
       )
     ).toBe("tpagentstudio-dev://auth/callback");
-    expect(new URL(buildOrg2CloudLoginUrl()).searchParams.get("return_to")).toBe(
-      "tpagentstudio-dev://auth/callback"
-    );
+    expect(
+      new URL(buildOrg2CloudLoginUrl()).searchParams.get("return_to")
+    ).toBe("tpagentstudio-dev://auth/callback");
   });
 
   it("derives the numbered and E2E fork callback scheme without using orgii", () => {

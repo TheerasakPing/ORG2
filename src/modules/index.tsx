@@ -25,6 +25,7 @@ import { ROUTES } from "@src/config/routes";
 import { BrowserProvider } from "@src/contexts/workstation";
 import { useViewportWidth } from "@src/engines/ChatPanel/hooks/useViewportWidth";
 import { useAgentADEActions } from "@src/engines/SessionCore/hooks/useAgentADEActions";
+import { LiveSessionMonitorLauncher } from "@src/features/SessionHealth/LiveSessionMonitorLauncher";
 import { useAppNavigate as useNavigate } from "@src/hooks/navigation/useAppNavigate";
 import { useProjectDataChangedListener } from "@src/hooks/project";
 import { useUrlPreviewEvents } from "@src/hooks/tabHost/useUrlPreviewEvents";
@@ -368,6 +369,8 @@ const AppShell = () => {
               </div>
             </div>
           </AppLayout>
+          {/* On-demand multi-session status; no background transcript polling. */}
+          <LiveSessionMonitorLauncher />
           <React.Suspense fallback={null}>
             <GuideHighlightOverlay />
             <WikiHost />

@@ -34,7 +34,7 @@
 - [x] Catch scheduler execute-factory panics, track dead worker handles, recover the queue on next enqueue, and persist failed session state; added targeted regression tests (final CI pending).
 - [x] Continue independent startup reconciliation phases after a partial failure so stale in-flight session cleanup is still attempted; see [multi-session recovery audit](SESSION_STALL_RECOVERY.md).
 - [ ] Implement bounded progress/heartbeat diagnostics for genuinely hung provider or Tool futures, with cancellation semantics that never replay side-effectful work.
-- [x] Add bounded, synthetic Rust `DialogScheduler` stress tests for 1/5/20/50 concurrent sessions, targeted cancellation, dead-worker no-replay isolation and queue capacity (test code added; CI verification pending). See [Multi-Session Stress Lab](MULTI_SESSION_STRESS_LAB.md).
+- [x] Add bounded, synthetic Rust `DialogScheduler` stress tests for 1/5/20/50 concurrent sessions, targeted cancellation, dead-worker no-replay isolation and queue capacity (CI confirmed: macOS Rust workspace tests, macOS/Windows Clippy and CodeQL passed on PR #20; real provider/tool load still unverified). See [Multi-Session Stress Lab](MULTI_SESSION_STRESS_LAB.md).
 - [ ] Stress-test 1/5/20/50 concurrent sessions under load and validate clean shutdown/restart on all three platforms.
 
 **Acceptance:** no double-owned memory consolidation; session/tool cancellation leaves no orphaned jobs; migration failures cannot leave an app silently running on a partially upgraded schema.
@@ -43,6 +43,9 @@
 
 - [ ] Define a shared session identity/event provenance contract for native Rust Harness and external CLI sessions.
 - [ ] Preserve multi-agent task/call provenance across replay, forks, and resume.
+- [x] Add a bounded, on-demand live Session Monitor panel using existing Rust roster and CLI hook status signals. See [Live Monitor](LIVE_SESSION_MONITOR.md).
+- [x] Emit content-free native Rust provider-request/tool-execute-start/tool-result transition events and project them into the opened Monitor (stacked PR, acceptance CI pending). These are not periodic heartbeats or proof of provider liveness.
+- [x] Emit rate-limited, content-free actual provider-delta progress pulses and read-only no-output advisories (PR awaiting native validation). No periodic scheduler heartbeat, destructive auto-recovery or real concurrency certification yet.
 - [ ] Build a unified runtime dashboard: tokens, costs, tool latency, retry reason, memory queue, session CPU/RAM, pending approvals.
 - [ ] Add permissions preview and audit receipts for CLI, MCP, desktop and browser execution.
 - [ ] Improve agent-team orchestration with role capabilities, checkpoints, budgets and human approval rules.

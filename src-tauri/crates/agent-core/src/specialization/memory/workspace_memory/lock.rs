@@ -420,6 +420,34 @@ mod tests {
     }
 
     #[test]
+    fn subprocess_cannot_steal_parent_lease() {
+        const CHILD_VAR: &str = "TP_DREAM_LOCK_CHILD_WORKSPACE";
+        if let Some(workspace) = std::env::var_os(CHILD_VAR) {
+            assert!(
+                try_acquire_lease(Path::new(&workspace)).unwrap().is_none(),
+                "child process must not obtain the parent's OS lease"
+            );
+            return;
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let parent = try_acquire_lease(tmp.path()).unwrap().unwrap();
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("subprocess_cannot_steal_parent_lease")
+            .arg("--nocapture")
+            .env(CHILD_VAR, tmp.path())
+            .output()
+            .expect("launch child test binary");
+        assert!(
+            child.status.success(),
+            "child lock test failed:\\n{}\\n{}",
+            String::from_utf8_lossy(&child.stdout),
+            String::from_utf8_lossy(&child.stderr)
+        );
+        drop(parent);
+    }
+
+    #[test]
     fn rollback_restores_previous_timestamp_across_platforms() {
         let tmp = TempDir::new().unwrap();
         record_consolidation(tmp.path()).unwrap();

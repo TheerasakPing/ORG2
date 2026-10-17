@@ -6,8 +6,8 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-const DEV_IDENTIFIER: &str = "org2ai.org2.dev";
-const DEV_EXECUTABLE_NAME: &str = "ORG2 Dev";
+const DEV_IDENTIFIER: &str = "com.theerasakping.tpagentstudio.dev";
+const DEV_EXECUTABLE_NAME: &str = "TP Agent Studio Dev";
 
 fn needs_named_executable(identifier: &str, executable: &Path) -> bool {
     if identifier != DEV_IDENTIFIER
@@ -72,9 +72,9 @@ mod tests {
         let bare = Path::new("/build/debug/org2");
         assert!(needs_named_executable(DEV_IDENTIFIER, bare));
         for identifier in [
-            "org2ai.org2",
-            "org2ai.org2.instance2",
-            "org2ai.org2.e2e.instance2",
+            "com.theerasakping.tpagentstudio",
+            "com.theerasakping.tpagentstudio.instance2",
+            "com.theerasakping.tpagentstudio.e2e.instance2",
         ] {
             assert!(!needs_named_executable(identifier, bare));
         }

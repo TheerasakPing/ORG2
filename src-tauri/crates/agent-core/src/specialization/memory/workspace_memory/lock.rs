@@ -84,6 +84,32 @@ impl Drop for ConsolidationLease {
     }
 }
 
+/// Report whether another thread/process owns the actual OS lease.
+/// Unlike the historical PID probe, this does not touch the timestamp and
+/// cannot accidentally roll back a concurrent consolidation.
+pub fn is_lease_held(workspace: &Path) -> Result<bool, String> {
+    let memory = super::memory_dir(workspace);
+    if !memory.exists() {
+        return Ok(false);
+    }
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(memory.join(LEASE_FILE))
+        .map_err(|err| format!("open consolidation lease for status: {err}"))?;
+    match fs2::FileExt::try_lock_exclusive(&lock_file) {
+        Ok(()) => {
+            // The lease is available. Closing the file releases the lock.
+            drop(lock_file);
+            Ok(false)
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => Ok(true),
+        Err(err) => Err(format!("probe consolidation lease: {err}")),
+    }
+}
+
 /// Try to acquire the consolidation lock as an RAII lease.
 pub fn try_acquire_lease(workspace: &Path) -> Result<Option<ConsolidationLease>, String> {
     let memory = super::memory_dir(workspace);
@@ -379,6 +405,20 @@ mod tests {
             .expect("lease available");
         lease.commit();
         assert!(read_last_consolidated_at(tmp.path()) > 0);
+    }
+
+    #[test]
+    fn status_probe_does_not_modify_memory_timestamp() {
+        let tmp = TempDir::new().unwrap();
+        assert!(!is_lease_held(tmp.path()).unwrap());
+        assert_eq!(read_last_consolidated_at(tmp.path()), 0);
+        let lease = try_acquire_lease(tmp.path()).unwrap().unwrap();
+        let stamp = read_last_consolidated_at(tmp.path());
+        assert!(is_lease_held(tmp.path()).unwrap());
+        assert_eq!(read_last_consolidated_at(tmp.path()), stamp);
+        lease.commit();
+        assert!(!is_lease_held(tmp.path()).unwrap());
+        assert_eq!(read_last_consolidated_at(tmp.path()), stamp);
     }
 
     #[test]

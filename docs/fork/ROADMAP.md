@@ -15,6 +15,9 @@
 - [x] Remove clickable upstream installer links from fork README and clear the disabled Tauri updater manifest list.
 - [ ] Replace remaining upstream public signing key, CI release dependencies and signing identities with fork-owned infrastructure.
 - [x] Harden the explicit fork data-root guard against parent traversal, missing suffixes and symlinked ancestors; add focused Rust and fork-safety tests.
+- [x] Align fork frontend runtime ports and OAuth callback schemes with embedded Rust application identifiers; include production/dev/numbered/E2E parity tests (CI evidence pending).
+- [ ] **P0 Cloud ownership:** Fork defaults still reference the ORG2-managed Supabase/web backend and some Cloud parsers still accept only `orgii://` links. Configure fork-owned endpoints, secrets/credential namespaces and redirect allowlists; until then, prohibit real-account cloud onboarding and production distribution. See [Cloud boundary audit](FORK_CLOUD_BOUNDARY.md).
+- [ ] Separate workspace-local `.orgii` metadata from upstream workspace metadata with opt-in migration, source-attributed ownership and rollback tests.
 - [ ] Run same-machine concurrent-install and migration/rollback tests.
 - [ ] Publish fork-built packages only after independent signing and end-to-end smoke tests.
 

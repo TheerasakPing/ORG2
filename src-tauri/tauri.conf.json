@@ -78,9 +78,7 @@
     },
     "updater": {
       "active": false,
-      "endpoints": [
-        "https://github.com/org2AI/ORG2/releases/latest/download/latest.json"
-      ],
+      "endpoints": [],
       "dialog": false,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDExNEQ5NjIzMjA1ODI5OUMKUldTY0tWZ2dJNVpORWFiWXB3NW5UaWwyOHVxRXhzVmRVbXl2WktZNnhiN2tqcXlVY3gxTTlPV3EK"
     },

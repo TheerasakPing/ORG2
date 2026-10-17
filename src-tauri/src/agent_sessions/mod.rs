@@ -22,3 +22,4 @@ pub mod human;
 pub mod session_directory;
 pub mod shared_file_outbox;
 pub mod turn_intents;
+pub mod worker_overview;

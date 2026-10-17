@@ -39,15 +39,129 @@
 use futures::FutureExt;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::time::Duration;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex as TokioMutex};
+use tokio::time::MissedTickBehavior;
 use tracing::{error, info, warn};
 
 use super::turn::streaming::{
     broadcast_agent_error_structured, classify_streaming_error_message, StreamingError,
 };
 use crate::bus::broadcast_event;
+
+// ============================================
+// Scheduler worker heartbeat (observation only, no automatic recovery)
+// ============================================
+
+const SCHEDULER_HEARTBEAT_PERIOD: Duration = Duration::from_secs(15);
+const SCHEDULER_HEARTBEAT_EVENT: &str = "agent:scheduler_heartbeat";
+
+/// One content-free observation. Epoch fences delayed callbacks from older
+/// turns even when the queue generation is unchanged. This does not mean the
+/// provider or tool future is progressing: only this worker task reached a
+/// Tokio polling boundary.
+fn scheduler_heartbeat_payload(
+    session_id: &str,
+    turn_intent_id: &str,
+    epoch: u64,
+    sequence: u64,
+    state: &'static str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "sessionId": session_id,
+        "turnIntentId": turn_intent_id,
+        "epoch": epoch,
+        "sequence": sequence,
+        "state": state,
+    })
+}
+
+/// Poll the *same* worker task's future and timer: a detached ticker could
+/// keep saying alive even if the worker task had died or stopped being polled.
+/// A slow awaited model/tool does not block heartbeat polling, but it also
+/// does not provide progress evidence. No deadline/abort/replay is introduced.
+async fn await_with_scheduler_heartbeat<F: Future>(
+    session_id: &str,
+    turn_intent_id: &str,
+    epoch: u64,
+    future: F,
+) -> F::Output {
+    let mut interval = tokio::time::interval(SCHEDULER_HEARTBEAT_PERIOD);
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    tokio::pin!(future);
+    let mut sequence = 0u64;
+
+    loop {
+        tokio::select! {
+            biased;
+            result = &mut future => {
+                broadcast_event(
+                    SCHEDULER_HEARTBEAT_EVENT,
+                    scheduler_heartbeat_payload(session_id, turn_intent_id, epoch, sequence, "finished"),
+                );
+                return result;
+            }
+            _ = interval.tick() => {
+                broadcast_event(
+                    SCHEDULER_HEARTBEAT_EVENT,
+                    scheduler_heartbeat_payload(session_id, turn_intent_id, epoch, sequence, "alive"),
+                );
+                sequence = sequence.saturating_add(1);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod scheduler_heartbeat_payload_tests {
+    use super::scheduler_heartbeat_payload;
+
+    #[test]
+    fn heartbeat_contains_only_fenced_noncontent_metadata() {
+        let payload = scheduler_heartbeat_payload("s", "turn-intent", 17, 6, "alive");
+        assert_eq!(payload["sessionId"], "s");
+        assert_eq!(payload["turnIntentId"], "turn-intent");
+        assert_eq!(payload["epoch"], 17);
+        assert_eq!(payload["sequence"], 6);
+        assert_eq!(payload["state"], "alive");
+        assert_eq!(payload.as_object().unwrap().len(), 5);
+        assert!(!payload.to_string().contains("content"));
+        assert!(!payload.to_string().contains("provider"));
+    }
+
+    #[test]
+    fn terminal_event_is_scoped_to_identical_epoch_and_intent() {
+        let payload = scheduler_heartbeat_payload("s", "intent-new", 18, 9, "finished");
+        assert_eq!(payload["epoch"], 18);
+        assert_eq!(payload["turnIntentId"], "intent-new");
+    }
+
+    #[tokio::test]
+    async fn observation_does_not_complete_or_cancel_a_pending_turn() {
+        use std::time::Duration;
+
+        let (release, pending) = tokio::sync::oneshot::channel::<u32>();
+        let observed = tokio::spawn(async move {
+            super::await_with_scheduler_heartbeat("session", "turn", 1, async {
+                pending.await.expect("test releases pending future")
+            }).await
+        });
+        // Wait long enough for the immediate first interval tick to be
+        // eligible, but not for its 15-second follow-up. The wait is NOT an
+        // agent timeout and must never cancel the pending future.
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert!(!observed.is_finished());
+        release.send(42).expect("listener still owns the pending future");
+        let result = tokio::time::timeout(Duration::from_secs(2), observed)
+            .await
+            .expect("released turn must complete")
+            .expect("test task must not panic");
+        assert_eq!(result, 42);
+    }
+}
 
 // ============================================
 // Scheduled Message
@@ -121,6 +235,45 @@ pub struct ScheduledMessage {
     pub execute: ExecuteFn,
 }
 
+/// Decrement a pending-message counter only when nonzero, retaining
+/// exactly the old checked_sub + fetch_update semantics on Rust MSRV 1.85.
+fn decrement_pending(counter: &AtomicUsize) {
+    let mut current = counter.load(Ordering::Acquire);
+    while current > 0 {
+        match counter.compare_exchange_weak(
+            current,
+            current - 1,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return,
+            Err(actual) => current = actual,
+        }
+    }
+}
+
+#[cfg(test)]
+mod atomic_pending_tests {
+    use super::decrement_pending;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn pending_counter_never_underflows() {
+        let count = Arc::new(AtomicUsize::new(7));
+        let tasks: Vec<_> = (0..20)
+            .map(|_| {
+                let count = Arc::clone(&count);
+                std::thread::spawn(move || decrement_pending(&count))
+            })
+            .collect();
+        for handle in tasks {
+            handle.join().unwrap();
+        }
+        assert_eq!(count.load(Ordering::Acquire), 0);
+    }
+}
+
 pub(crate) fn panic_payload_to_string(payload: &(dyn Any + Send)) -> String {
     if let Some(message) = payload.downcast_ref::<String>() {
         return message.clone();
@@ -174,6 +327,21 @@ pub struct EnqueueResult {
     pub duplicate: bool,
 }
 
+/// Read-only, ephemeral snapshot of one session-owned Scheduler.
+#[derive(Debug, Clone, Copy)]
+pub struct SchedulerWorkerSnapshot {
+    /// The scheduler has started a worker task at least once in this lifetime.
+    pub initialized: bool,
+    /// Tokio join handle or receiver indicates the worker is no longer live.
+    pub terminated: bool,
+    /// Any job, including maintenance, is currently being processed.
+    pub busy: bool,
+    /// Whether the active job is a user-facing Turn (not maintenance).
+    pub turn_processing: bool,
+    /// Approximate number of queued jobs, excluding the current job.
+    pub pending: usize,
+}
+
 // ============================================
 // DialogScheduler
 // ============================================
@@ -181,6 +349,8 @@ pub struct EnqueueResult {
 /// Inner state initialized lazily on first enqueue.
 struct SchedulerInner {
     tx: mpsc::Sender<ScheduledMessage>,
+    /// Retain the worker handle to detect unexpected task termination.
+    worker: tokio::task::JoinHandle<()>,
 }
 
 /// Per-session FIFO message queue with a single background worker.
@@ -205,6 +375,9 @@ pub struct DialogScheduler {
     /// Monotonic queue generation. Incrementing this invalidates messages
     /// enqueued under older generations without needing to recreate the worker.
     generation: Arc<AtomicU64>,
+    /// Monotonic identity for every claimed Turn; unlike queue generation it
+    /// changes for each Turn, fencing delayed/duplicate UI heartbeats.
+    heartbeat_epoch: Arc<AtomicU64>,
     /// Whether the worker is currently executing a message of any kind.
     processing: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the job the worker is currently executing is a [`ScheduledKind::Turn`].
@@ -243,6 +416,7 @@ impl DialogScheduler {
             inner: TokioMutex::new(None),
             pending: Arc::new(AtomicUsize::new(0)),
             generation: Arc::new(AtomicU64::new(0)),
+            heartbeat_epoch: Arc::new(AtomicU64::new(0)),
             processing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             processing_turn: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             client_message_ids: Arc::new(TokioMutex::new(HashMap::new())),
@@ -253,10 +427,57 @@ impl DialogScheduler {
     async fn ensure_initialized(&self) -> mpsc::Sender<ScheduledMessage> {
         let mut guard = self.inner.lock().await;
         if let Some(inner) = guard.as_ref() {
-            return inner.tx.clone();
+            if !inner.worker.is_finished() && !inner.tx.is_closed() {
+                return inner.tx.clone();
+            }
+
+            // A previous worker died (for example, from a panic outside the
+            // turn executor). Its receiver is gone, but the retained sender
+            // makes the scheduler appear initialized forever. Reset only the
+            // now-orphaned in-memory queue, never replay dropped tool effects.
+            warn!(
+                session_id = %self.session_id,
+                "[scheduler] worker terminated unexpectedly; replacing closed queue"
+            );
+            self.generation.fetch_add(1, Ordering::AcqRel);
+            self.pending.store(0, Ordering::Release);
+            let was_running_turn = self.processing_turn.swap(false, Ordering::AcqRel);
+            self.processing.store(false, Ordering::Release);
+            self.client_message_ids.lock().await.clear();
+            let interrupted = {
+                let mut control = self.turn_control.lock();
+                control.cancelled.clear();
+                control.current.take()
+            };
+            if let Some(ref turn_id) = interrupted {
+                crate::foundation::session_bridge::update_turn_intent_status(
+                    &self.session_id,
+                    turn_id,
+                    crate::foundation::session_bridge::TurnIntentBridgeStatus::Failed,
+                );
+            }
+            crate::foundation::session_bridge::mark_pending_turn_intents_stale(&self.session_id);
+            if was_running_turn {
+                if let Err(err) = crate::session::persistence::update_status(
+                    &self.session_id,
+                    crate::session::SessionStatus::Abandoned,
+                ) {
+                    warn!(
+                        session_id = %self.session_id,
+                        error = %err,
+                        "[scheduler] could not persist interrupted session status"
+                    );
+                }
+                let streaming_error = StreamingError::new(
+                    "Session worker stopped unexpectedly; the interrupted turn was not replayed. Send a new message to retry.".to_string(),
+                    classify_streaming_error_message("Session worker stopped unexpectedly"),
+                );
+                broadcast_agent_error_structured(&self.session_id, &streaming_error);
+            }
+            self.broadcast_queue_status();
         }
 
-        // First enqueue — spawn the worker now
+        // First enqueue or replace a dead worker — spawn a new receiver
         let (tx, rx) = mpsc::channel::<ScheduledMessage>(self.capacity);
 
         let worker = WorkerTask {
@@ -264,19 +485,23 @@ impl DialogScheduler {
             rx,
             pending: Arc::clone(&self.pending),
             generation: Arc::clone(&self.generation),
+            heartbeat_epoch: Arc::clone(&self.heartbeat_epoch),
             processing: Arc::clone(&self.processing),
             processing_turn: Arc::clone(&self.processing_turn),
             client_message_ids: Arc::clone(&self.client_message_ids),
             turn_control: Arc::clone(&self.turn_control),
         };
-        tokio::spawn(worker.run());
+        let worker = tokio::spawn(worker.run());
 
         info!(
             "[scheduler] Worker spawned for session={} (capacity={})",
             self.session_id, self.capacity
         );
 
-        *guard = Some(SchedulerInner { tx: tx.clone() });
+        *guard = Some(SchedulerInner {
+            tx: tx.clone(),
+            worker,
+        });
         tx
     }
 
@@ -417,6 +642,24 @@ impl DialogScheduler {
         self.turn_control.lock().cancelled.contains(turn_intent_id)
     }
 
+    /// Snapshot the in-memory Worker state without creating a worker, queue,
+    /// data source or performing any database I/O. The status is best effort
+    /// while a concurrent enqueue/dequeue may advance between atomics.
+    pub async fn worker_snapshot(&self) -> SchedulerWorkerSnapshot {
+        let worker = self.inner.lock().await;
+        let initialized = worker.is_some();
+        let terminated = worker.as_ref().is_some_and(|entry| {
+            entry.worker.is_finished() || entry.tx.is_closed()
+        });
+        SchedulerWorkerSnapshot {
+            initialized,
+            terminated,
+            busy: self.is_processing(),
+            turn_processing: self.is_turn_processing(),
+            pending: self.pending_count(),
+        }
+    }
+
     /// Whether the worker is currently executing a job of any kind.
     ///
     /// This is "the worker is busy" — it includes maintenance jobs. Callers
@@ -448,6 +691,37 @@ impl DialogScheduler {
     }
 }
 
+#[cfg(test)]
+mod worker_snapshot_tests {
+    use super::DialogScheduler;
+
+    #[tokio::test]
+    async fn snapshot_does_not_spawn_uninitialized_worker() {
+        let scheduler = DialogScheduler::new("snapshot-lazy", 4);
+        let observation = scheduler.worker_snapshot().await;
+        assert!(!observation.initialized);
+        assert!(!observation.terminated);
+        assert!(!observation.busy);
+        assert!(!observation.turn_processing);
+        assert_eq!(observation.pending, 0);
+        // Merely reading state should not create an inner handle.
+        assert!(scheduler.inner.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn snapshot_distinguishes_spawned_idle_from_unstarted_worker() {
+        let scheduler = DialogScheduler::new("snapshot-idle", 4);
+        let tx = scheduler.ensure_initialized().await;
+        let observation = scheduler.worker_snapshot().await;
+        assert!(observation.initialized);
+        assert!(!observation.terminated);
+        assert!(!observation.busy);
+        assert!(!observation.turn_processing);
+        assert_eq!(observation.pending, 0);
+        drop(tx);
+    }
+}
+
 // ============================================
 // Worker Task
 // ============================================
@@ -457,6 +731,7 @@ struct WorkerTask {
     rx: mpsc::Receiver<ScheduledMessage>,
     pending: Arc<AtomicUsize>,
     generation: Arc<AtomicU64>,
+    heartbeat_epoch: Arc<AtomicU64>,
     processing: Arc<std::sync::atomic::AtomicBool>,
     processing_turn: Arc<std::sync::atomic::AtomicBool>,
     client_message_ids: Arc<TokioMutex<HashMap<String, String>>>,
@@ -478,11 +753,7 @@ impl WorkerTask {
                 }
             };
             if targeted_cancelled {
-                let _ = self
-                    .pending
-                    .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                        count.checked_sub(1)
-                    });
+                decrement_pending(&self.pending);
                 crate::foundation::session_bridge::update_turn_intent_status(
                     &self.session_id,
                     &msg.turn_intent_id,
@@ -524,11 +795,7 @@ impl WorkerTask {
                 continue;
             }
 
-            let _ = self
-                .pending
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                    count.checked_sub(1)
-                });
+            decrement_pending(&self.pending);
 
             let is_turn = msg.kind == ScheduledKind::Turn;
             self.processing.store(true, Ordering::Relaxed);
@@ -566,11 +833,26 @@ impl WorkerTask {
             let client_message_id = msg.client_message_id.clone();
             let turn_intent_id = msg.turn_intent_id.clone();
             let org_run_id = msg.org_run_id.clone();
-            let execute_future = (msg.execute)();
-            let result = std::panic::AssertUnwindSafe(execute_future)
-                .catch_unwind()
-                .await
-                .unwrap_or_else(|panic_payload| {
+            // The factory itself can panic before it returns a Future.
+            // Place its invocation INSIDE the catch boundary so an otherwise
+            // valid per-session worker cannot disappear with a live sender.
+            let execute = msg.execute;
+            let execution = std::panic::AssertUnwindSafe(async move { execute().await })
+                .catch_unwind();
+            // Heartbeat from inside the actual scheduler worker, never from a
+            // detached timer. Do not advertise maintenance jobs as active turns.
+            let outcome = if is_turn {
+                let epoch = self.heartbeat_epoch.fetch_add(1, Ordering::AcqRel) + 1;
+                await_with_scheduler_heartbeat(
+                    &self.session_id,
+                    &turn_intent_id,
+                    epoch,
+                    execution,
+                ).await
+            } else {
+                execution.await
+            };
+            let result = outcome.unwrap_or_else(|panic_payload| {
                     let panic_message = panic_payload_to_string(panic_payload.as_ref());
                     error!(
                         "[scheduler] Turn executor panicked for session {} message {}: {}",
@@ -692,6 +974,28 @@ impl WorkerTask {
                             &turn_intent_id,
                             crate::foundation::session_bridge::TurnIntentBridgeStatus::Failed,
                         );
+                    }
+                    // If the callback failed before its normal finalizer
+                    // ran, the session DB can still say "running" while the
+                    // in-memory worker has already moved on. Clear that
+                    // phantom status for ordinary failed turns. Never alter
+                    // previously terminal, stale, or intervention-owned work.
+                    if is_turn
+                        && !already_terminal
+                        && !stale_callback
+                        && !user_directed_waiting
+                        && !user_directed_cancelled
+                    {
+                        if let Err(error) = crate::session::persistence::update_status(
+                            &self.session_id,
+                            crate::session::SessionStatus::Failed,
+                        ) {
+                            warn!(
+                                session_id = %self.session_id,
+                                error = %error,
+                                "[scheduler] failed to persist failed turn session status"
+                            );
+                        }
                     }
                     // Turn-only: an `agent:error` renders as a chat bubble.
                     // Maintenance jobs report failures through their own
@@ -822,12 +1126,170 @@ async fn reconcile_agent_org_run_after_terminal(run_id: &str) {
 }
 
 #[cfg(test)]
+mod stress_tests;
+
+#[cfg(test)]
 mod final_summary_tests;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn executor_factory_panic_does_not_kill_the_session_worker() {
+        let scheduler = DialogScheduler::new("session-factory-panic", 8);
+        scheduler
+            .enqueue(ScheduledMessage {
+                kind: ScheduledKind::Turn,
+                message_id: "factory-panics".into(),
+                generation: 0,
+                client_message_id: None,
+                turn_intent_id: String::new(),
+                org_run_id: None,
+                content: "panic".into(),
+                execute: Box::new(|| panic!("factory failed before creating a future")),
+            })
+            .await
+            .expect("factory panic must not occur on the caller");
+
+        let completed = Arc::new(AtomicUsize::new(0));
+        let completed_in_turn = Arc::clone(&completed);
+        scheduler
+            .enqueue(ScheduledMessage {
+                kind: ScheduledKind::Turn,
+                message_id: "after-factory-panic".into(),
+                generation: 0,
+                client_message_id: None,
+                turn_intent_id: String::new(),
+                org_run_id: None,
+                content: "continue".into(),
+                execute: Box::new(move || {
+                    Box::pin(async move {
+                        completed_in_turn.fetch_add(1, Ordering::SeqCst);
+                        Ok(ExecutionCompletion::Finished)
+                    })
+                }),
+            })
+            .await
+            .expect("enqueue after factory panic");
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while completed.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("factory panic must not poison the worker or later queue items");
+        assert_eq!(scheduler.pending_count(), 0);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn failed_executor_reconciles_persisted_running_session() {
+        use crate::session::persistence::{self, UnifiedSessionRecord};
+        use core_types::key_source::KeySource;
+
+        let _sandbox = test_helpers::test_env::sandbox();
+        let session_id = "session-failed-executor-status";
+        {
+            let conn = database::db::get_connection().expect("test DB");
+            crate::persistence::test_schema::ensure_agent_sessions_schema(&conn);
+            persistence::init(&conn).expect("session tables");
+        }
+        let record = UnifiedSessionRecord {
+            session_id: session_id.to_string(),
+            name: "status regression".to_string(),
+            status: crate::session::SessionStatus::Running.as_str().to_string(),
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            session_type: "sde".to_string(),
+            key_source: KeySource::OwnKey,
+            ..Default::default()
+        };
+        persistence::upsert_session(&record).expect("seed running session");
+
+        let scheduler = DialogScheduler::new(session_id, 8);
+        scheduler
+            .enqueue(ScheduledMessage {
+                kind: ScheduledKind::Turn,
+                message_id: "failing-turn".into(),
+                generation: 0,
+                client_message_id: None,
+                turn_intent_id: String::new(),
+                org_run_id: None,
+                content: "fail".into(),
+                execute: Box::new(|| Box::pin(async { Err("provider failed".to_string()) })),
+            })
+            .await
+            .expect("enqueue");
+
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                if persistence::get_session(session_id)
+                    .expect("query session")
+                    .is_some_and(|row| row.status == crate::session::SessionStatus::Failed.as_str())
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("failed callback must clear durable running status");
+    }
+
+    #[tokio::test]
+    async fn a_dead_worker_is_recreated_on_the_next_enqueue() {
+        let scheduler = DialogScheduler::new("session-aborted-worker", 8);
+        scheduler.ensure_initialized().await;
+        {
+            let guard = scheduler.inner.lock().await;
+            guard.as_ref().expect("worker started").worker.abort();
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let finished = {
+                    let guard = scheduler.inner.lock().await;
+                    guard.as_ref().expect("worker exists").worker.is_finished()
+                };
+                if finished {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("aborted worker eventually stops");
+
+        let completed = Arc::new(AtomicUsize::new(0));
+        let completed_in_turn = Arc::clone(&completed);
+        scheduler
+            .enqueue(ScheduledMessage {
+                kind: ScheduledKind::Maintenance,
+                message_id: "after-worker-abort".into(),
+                generation: 0,
+                client_message_id: None,
+                turn_intent_id: String::new(),
+                org_run_id: None,
+                content: String::new(),
+                execute: Box::new(move || {
+                    Box::pin(async move {
+                        completed_in_turn.fetch_add(1, Ordering::SeqCst);
+                        Ok(ExecutionCompletion::Finished)
+                    })
+                }),
+            })
+            .await
+            .expect("dead worker must be replaced");
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while completed.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("replacement worker processes a fresh queue item");
+    }
 
     #[test]
     fn targeted_cancellation_registry_is_bounded_and_keeps_the_latest_fence() {

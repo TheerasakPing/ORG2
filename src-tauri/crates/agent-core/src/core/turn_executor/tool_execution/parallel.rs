@@ -509,15 +509,21 @@ mod tests {
     async fn assert_completed_batch_survives_early_exit(first_is_error: bool) {
         let _sandbox = test_helpers::test_env::sandbox();
         let sid = "parallel-history-regression";
-        let conn = database::db::get_connection().unwrap();
-        crate::persistence::test_schema::ensure_agent_sessions_schema(&conn);
-        crate::persistence::session_snapshots::ensure_tables().unwrap();
-        conn.execute(
-            "INSERT INTO agent_sessions (session_id,name,session_type,status,created_at,updated_at)
-             VALUES (?1,'Parallel history test','agent','running',datetime('now'),datetime('now'))",
-            [sid],
-        )
-        .unwrap();
+        // Session writes must use the process-wide serializer just like the
+        // production persistence path. Running this fixture INSERT directly
+        // against SQLite races with concurrently executing writer tests:
+        // busy_timeout cannot resolve a deferred-transaction upgrade race.
+        database::db::with_sessions_writer(|| {
+            let conn = database::db::get_connection().unwrap();
+            crate::persistence::test_schema::ensure_agent_sessions_schema(&conn);
+            crate::persistence::session_snapshots::ensure_tables().unwrap();
+            conn.execute(
+                "INSERT INTO agent_sessions (session_id,name,session_type,status,created_at,updated_at)
+                 VALUES (?1,'Parallel history test','agent','running',datetime('now'),datetime('now'))",
+                [sid],
+            )
+            .unwrap();
+        });
         let handler = UnifiedEventHandler::new(EventHandlerConfig::default());
         let mut tools = ToolRegistry::new();
         tools.register(Box::new(CompletedBatchTool { first_is_error }));

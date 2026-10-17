@@ -9,8 +9,13 @@ import {
 import {
   type SmokeRoot,
   createSmokeRoot,
+  dispatch,
   settle,
 } from "@src/test/reactSmokeHarness";
+import {
+  clearAllSessionWatchdogWarnings,
+  recordSessionWatchdogWarning,
+} from "@src/engines/SessionCore/sync/sessionWatchdogWarnings";
 
 import AgentStatusTrail from "./AgentStatusTrail";
 import type { PlanningIndicatorMode } from "./chatActivityLabel";
@@ -19,6 +24,8 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: Record<string, unknown>) => {
       switch (key) {
+        case "planning.statusTrail.longRunning":
+          return `Long-running (${options?.minutes} min; may still be working)`;
         case "planning.statusTrail.agentWorking":
           return "Agent working";
         case "planning.statusTrail.agentWorkingFor":
@@ -86,6 +93,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await smoke.unmount();
+  clearAllSessionWatchdogWarnings();
   vi.useRealTimers();
 });
 
@@ -221,6 +229,36 @@ describe("AgentStatusTrail", () => {
         .querySelector('[data-testid="session-identity-icon"]')
         ?.getAttribute("data-session-id")
     ).toBe("codexapp-42");
+  });
+
+  it("shows only the active session's observation-only long-running warning", async () => {
+    await render(state({ startedAtMs: startedAgo(180_000) }), {
+      sessionId: "session-a",
+    });
+    await dispatch(() => {
+      recordSessionWatchdogWarning("session-b", {
+        sessionId: "session-b",
+        messageId: "turn-b",
+        elapsedSeconds: 180,
+        warningCount: 1,
+        observeOnly: true,
+      });
+    });
+    expect(smoke.container.textContent).not.toContain("Long-running");
+    await dispatch(() => {
+      recordSessionWatchdogWarning("session-a", {
+        sessionId: "session-a",
+        messageId: "turn-a",
+        elapsedSeconds: 180,
+        warningCount: 1,
+        observeOnly: true,
+      });
+    });
+    expect(smoke.container.textContent).toContain(
+      "Long-running (3 min; may still be working)"
+    );
+    await render(state({ phase: "idle" }), { sessionId: "session-a" });
+    expect(smoke.container.textContent).toBe("Agent is idle");
   });
 
   it("keeps the live pulse on the agent mark", async () => {

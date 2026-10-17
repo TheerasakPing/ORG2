@@ -88,9 +88,7 @@ describe("buildCloudAuthCallbackUrl", () => {
 
   it("uses only fork-owned return schemes for fork production and dev builds", () => {
     expect(
-      configureCloudAuthCallbackForIdentifier(
-        "com.theerasakping.tpagentstudio"
-      )
+      configureCloudAuthCallbackForIdentifier("com.theerasakping.tpagentstudio")
     ).toBe("tpagentstudio://auth/callback");
     expect(new URL(buildOrg2CloudLoginUrl()).searchParams.get("return_to")).toBe(
       "tpagentstudio://auth/callback"

@@ -914,6 +914,106 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    #[tokio::test]
+    async fn executor_factory_panic_does_not_kill_the_session_worker() {
+        let scheduler = DialogScheduler::new("session-factory-panic", 8);
+        scheduler
+            .enqueue(ScheduledMessage {
+                kind: ScheduledKind::Turn,
+                message_id: "factory-panics".into(),
+                generation: 0,
+                client_message_id: None,
+                turn_intent_id: String::new(),
+                org_run_id: None,
+                content: "panic".into(),
+                execute: Box::new(|| panic!("factory failed before creating a future")),
+            })
+            .await
+            .expect("factory panic must not occur on the caller");
+
+        let completed = Arc::new(AtomicUsize::new(0));
+        let completed_in_turn = Arc::clone(&completed);
+        scheduler
+            .enqueue(ScheduledMessage {
+                kind: ScheduledKind::Turn,
+                message_id: "after-factory-panic".into(),
+                generation: 0,
+                client_message_id: None,
+                turn_intent_id: String::new(),
+                org_run_id: None,
+                content: "continue".into(),
+                execute: Box::new(move || {
+                    Box::pin(async move {
+                        completed_in_turn.fetch_add(1, Ordering::SeqCst);
+                        Ok(ExecutionCompletion::Finished)
+                    })
+                }),
+            })
+            .await
+            .expect("enqueue after factory panic");
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while completed.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("factory panic must not poison the worker or later queue items");
+        assert_eq!(scheduler.pending_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_dead_worker_is_recreated_on_the_next_enqueue() {
+        let scheduler = DialogScheduler::new("session-aborted-worker", 8);
+        scheduler.ensure_initialized().await;
+        {
+            let guard = scheduler.inner.lock().await;
+            guard.as_ref().expect("worker started").worker.abort();
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let finished = {
+                    let guard = scheduler.inner.lock().await;
+                    guard.as_ref().expect("worker exists").worker.is_finished()
+                };
+                if finished {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("aborted worker eventually stops");
+
+        let completed = Arc::new(AtomicUsize::new(0));
+        let completed_in_turn = Arc::clone(&completed);
+        scheduler
+            .enqueue(ScheduledMessage {
+                kind: ScheduledKind::Maintenance,
+                message_id: "after-worker-abort".into(),
+                generation: 0,
+                client_message_id: None,
+                turn_intent_id: String::new(),
+                org_run_id: None,
+                content: String::new(),
+                execute: Box::new(move || {
+                    Box::pin(async move {
+                        completed_in_turn.fetch_add(1, Ordering::SeqCst);
+                        Ok(ExecutionCompletion::Finished)
+                    })
+                }),
+            })
+            .await
+            .expect("dead worker must be replaced");
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while completed.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("replacement worker processes a fresh queue item");
+    }
+
     #[test]
     fn targeted_cancellation_registry_is_bounded_and_keeps_the_latest_fence() {
         let scheduler = DialogScheduler::new("session-targeted-cancel-bound", 8);

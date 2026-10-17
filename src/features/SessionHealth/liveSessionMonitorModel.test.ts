@@ -132,6 +132,27 @@ describe("live session monitor presentation model", () => {
     expect(summary.rows.map((r) => r.id)).toEqual(["local"]);
   });
 
+  it("includes a read-only LOCAL CLI history row only with an exact live hook", () => {
+    const rows = [
+      session("local-hooked", "completed", undefined, { readOnly: true }),
+      session("readonly-unknown", "running", undefined, { readOnly: true }),
+      session("cloud", "running", undefined, {
+        readOnly: true,
+        importedFrom: {
+          orgId: "org", sourceSessionId: "remote", ownerMemberId: "member",
+          epoch: 0, seq: 0, count: 0,
+        },
+      }),
+    ];
+    const live = new Map<string, AgentLiveStatus>([
+      ["local-hooked", hook("local-hooked", "running")],
+      ["cloud", hook("cloud", "running")],
+    ]);
+    const result = deriveLiveSessionSummary(rows, live, { nowMs: NOW });
+    expect(result.rows.map((row) => row.id)).toEqual(["local-hooked"]);
+    expect(result.rows[0]?.source).toBe("cli-hook");
+  });
+
   it("keeps the visible collection bounded to fifty rows", () => {
     const sessions = Array.from({ length: 100 }, (_, i) =>
       session("session-" + i, "running")

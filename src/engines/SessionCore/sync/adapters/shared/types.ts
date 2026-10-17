@@ -217,6 +217,18 @@ export interface AgentWSEvent {
   pendingCount?: number;
   /** Whether the Rust scheduler is currently executing a queued turn. */
   isProcessing?: boolean;
+  /** Queue item identity on a new turn (used to retire previous warnings). */
+  currentMessageId?: string;
+
+  // ============================================
+  // Observation-only scheduler event (agent:turn_watchdog)
+  // ============================================
+
+  /** Message identity. The event carries no user content or credentials. */
+  messageId?: string;
+  elapsedSeconds?: number;
+  warningCount?: number;
+  observeOnly?: boolean;
 
   // ============================================
   // Shell Process Events (agent:shell_process_started/backgrounded/exited)

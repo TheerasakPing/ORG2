@@ -80,8 +80,11 @@ export function deriveLiveSessionSummary(
   // The app-wide session roster is already paginated. Do not trigger a
   // per-session data load or subscribe to transcript/event atoms.
   for (const session of sessions) {
-    if (session.readOnly || session.importedFrom) continue;
+    // Cloud replay copies are never local execution authority. A local CLI
+    // imported-history row can still have a real live hook, however; allow
+    // that read-only transcript only when its exact local hook is present.
     const hook = statuses.get(session.session_id);
+    if (session.importedFrom || (session.readOnly && !hook)) continue;
     const status = hook?.status ?? session.status;
     const phase = monitorPhase(status);
     if (activeOnly && phase !== "working" && phase !== "attention") continue;

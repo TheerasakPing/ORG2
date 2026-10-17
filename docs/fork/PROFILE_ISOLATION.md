@@ -24,8 +24,8 @@ This is a startup **accidental-overlap guard**, not a hardened per-operation dir
 ```sh
 node scripts/fork/check-identity.mjs
 cd src-tauri
-cargo test -p app_lib runtime_instance::tests
+cargo test -p org2 runtime_instance::tests
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-The test target/name should be verified against the Tauri root crate before running. CI evidence, not this document, is the authority for a passing build.
+CI evidence, not this document, is the authority for a passing build.

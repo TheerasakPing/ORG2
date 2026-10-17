@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { AgentLiveStatus } from "@src/api/tauri/rpc/schemas/agentOrgs";
 import type { Session } from "@src/store/session/sessionAtom/types";
 
+import { ingestNativePhase } from "./nativePhaseEvents";
+
 import {
   deriveLiveSessionSummary,
   MAX_LIVE_MONITOR_ROWS,
@@ -190,4 +192,49 @@ describe("live session monitor presentation model", () => {
     expect(JSON.stringify(s)).not.toContain("VERY SECRET USER INPUT");
     expect(JSON.stringify(s)).not.toContain("SECRET provider token");
   });
+
+  it("shows the actual Rust provider boundary only for an observed native session", () => {
+    const phases = ingestNativePhase(new Map(), {
+      sessionId: "native-1", turnId: "turn-1", phase: "provider_request",
+    }, NOW);
+    const summary = deriveLiveSessionSummary(
+      [session("native-1", "running"), session("native-2", "running")],
+      new Map(),
+      { nowMs: NOW, nativePhases: phases }
+    );
+    expect(summary.rows.find((r) => r.id === "native-1")?.detail).toContain("provider request");
+    expect(summary.rows.find((r) => r.id === "native-1")?.source).toBe("native-phase");
+    expect(summary.rows.find((r) => r.id === "native-2")?.detail).toContain("step unknown");
+  });
+
+  it("does not display a native running phase against a terminal session", () => {
+    const phases = ingestNativePhase(new Map(), {
+      sessionId: "native", turnId: "turn-1",
+      phase: "tool_executing", tool: "read_file",
+    }, NOW);
+    const summary = deriveLiveSessionSummary(
+      [session("native", "completed")], new Map(),
+      { nowMs: NOW, nativePhases: phases, activeOnly: false }
+    );
+    expect(summary.rows[0]?.source).toBe("session-roster");
+    expect(summary.rows[0]?.detail).toContain("step unknown");
+  });
+
+  it("prioritizes authoritative CLI hook details over unrelated native phase", () => {
+    const phases = ingestNativePhase(new Map(), {
+      sessionId: "cli", turnId: "turn-1", phase: "tool_executing",
+      tool: "Read",
+    }, NOW);
+    const h = hook("cli", "waiting_for_user", {
+      interactivePrompt: "SECRET PROMPT",
+    });
+    const summary = deriveLiveSessionSummary(
+      [session("cli", "running")], new Map([["cli", h]]),
+      { nowMs: NOW, nativePhases: phases }
+    );
+    expect(summary.rows[0]?.source).toBe("cli-hook");
+    expect(summary.rows[0]?.detail).toContain("waiting for user");
+    expect(JSON.stringify(summary)).not.toContain("SECRET");
+  });
+
 });

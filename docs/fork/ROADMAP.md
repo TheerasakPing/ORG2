@@ -8,10 +8,12 @@
 ## P0 — Safe ownership and packaging (must pass before installers)
 
 - [ ] Select a final brand and domain; inventory ORG2 trademarks and upstream-only UI links.
-- [ ] Change app name/identifier and macOS/Windows/Linux metadata without clobbering upstream installs.
-- [ ] Introduce a configurable app-data root; isolate SQLite databases, workspace memory, key storage, sidecars, logs, IPC ports and deep-link protocols.
+- [x] Introduce original two-tone TP Agent Studio icons for desktop bundle, Dev and default live Dock; remaining tray, Store/mobile and legacy optional Dock variants need rebranding and platform validation.
+- [x] Add provisional TP Agent Studio Tauri names/identifiers for main, dev and Windows; installer coexistence requires runtime acceptance tests.
+- [x] Move the canonical application data root and runtime-default ports to fork-specific paths; external history and native transcript defaults are isolated. Remaining hard-coded legacy paths, runtime hooks and installer coexistence still require an end-to-end audit.
 - [x] Disable base updater and custom Rust upstream update route for unreleased fork.
 - [ ] Replace update URLs, public signing key, CI release dependencies and signing identities with fork-owned infrastructure.
+- [x] Harden the explicit fork data-root guard against parent traversal, missing suffixes and symlinked ancestors; add focused Rust and fork-safety tests.
 - [ ] Run same-machine concurrent-install and migration/rollback tests.
 - [ ] Publish fork-built packages only after independent signing and end-to-end smoke tests.
 
@@ -19,7 +21,8 @@
 
 ## P1 — Reliability and security
 
-- [ ] Replace PID/write-and-read workspace auto-dream lock with a real cross-process atomic lock and race tests.
+- [x] Replace the production auto-dream acquisition path with a stable OS-level exclusive file lease, plus eight-contender, cross-process exclusion tests and portable rollback.
+- [ ] Add multi-process crash/kill/restart, Windows/macOS/Linux lock test evidence and split committed timestamp from in-progress state.
 - [ ] Add sandbox profiles for untrusted agent shell commands; separate read/write paths, environment secrets, network and process limits.
 - [ ] Introduce versioned, transactional SQLite migrations with verification and recovery procedures.
 - [ ] Classify transient vs permanent LLM reflection failures; TTL/backoff rather than permanent blacklist for transient errors.

@@ -36,7 +36,9 @@ export function SessionRowStatusDot({
       aria-label={label}
       aria-hidden={label ? undefined : true}
       className={`h-1.5 w-1.5 rounded-full ${
-        tone === "working" ? "opacity-90" : ""
+        tone === "working"
+          ? "animate-pulse opacity-90 shadow-[0_0_8px_rgba(6,182,212,0.95)] ring-1 ring-cyan-400/80"
+          : ""
       }`.trim()}
       style={{ backgroundColor: resolveSessionStatusDotColor(tone) }}
     />
@@ -69,7 +71,13 @@ export function SessionRowLeadingIcon({
         aria-hidden
       />
       {statusTone ? (
-        <span className="pointer-events-none absolute -right-0.5 -bottom-0.5 inline-flex rounded-full bg-bg-1 ring-1 ring-bg-1">
+        <span
+          className={`pointer-events-none absolute -right-0.5 -bottom-0.5 inline-flex rounded-full bg-bg-1 ring-1 ring-bg-1 ${
+            statusTone === "working"
+              ? "shadow-[0_0_6px_rgba(6,182,212,0.6)]"
+              : ""
+          }`}
+        >
           <SessionRowStatusDot tone={statusTone} label={statusLabel} />
         </span>
       ) : null}

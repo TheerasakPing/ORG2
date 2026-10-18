@@ -8,22 +8,40 @@ function Metric({
   label,
   value,
   caution = false,
+  highlight = false,
 }: {
   label: string;
   value: number | undefined;
   caution?: boolean;
+  highlight?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-border-1 bg-bg-1 p-2 text-center">
+    <div
+      className={`rounded-lg border p-2 text-center transition-all ${
+        highlight && value
+          ? "border-cyan-500/40 bg-cyan-500/10 shadow-[0_0_10px_rgba(6,182,212,0.15)]"
+          : "border-border-1 bg-bg-1"
+      }`}
+    >
       <div
         className={
           "text-lg font-bold " +
-          (caution && value ? "text-amber-600" : "text-text-1")
+          (highlight && value
+            ? "text-cyan-400"
+            : caution && value
+              ? "text-amber-600"
+              : "text-text-1")
         }
       >
         {value ?? "—"}
       </div>
-      <div className="text-[10px] leading-tight text-text-3">{label}</div>
+      <div
+        className={`text-[10px] leading-tight ${
+          highlight && value ? "font-medium text-cyan-300" : "text-text-3"
+        }`}
+      >
+        {label}
+      </div>
     </div>
   );
 }
@@ -36,7 +54,7 @@ function Breakdown({ overview }: { overview: NativeWorkerOverview | null }) {
         data-testid="native-worker-counters"
       >
         <Metric label="Workers created" value={overview?.initializedWorkers} />
-        <Metric label="Running jobs" value={overview?.busyWorkers} />
+        <Metric label="Running jobs" value={overview?.busyWorkers} highlight />
         <Metric label="Idle Workers" value={overview?.idleWorkers} />
         <Metric label="Queued jobs" value={overview?.queuedJobs} />
         <Metric

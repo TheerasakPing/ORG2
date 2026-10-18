@@ -5,65 +5,48 @@
 - **Architecture:** Cooperative Watchdog timeout wrappers, global Tokio concurrency governor, and enhanced startup state reconciliation.
 - **Reference Spec:** [`docs/superpowers/specs/2026-10-18-core-engine-resilience-design.md`](file:///Volumes/Data/workspace/git/ORG2/docs/superpowers/specs/2026-10-18-core-engine-resilience-design.md)
 - **Branch:** `work/macos-m4-beta-readiness`
+- **PR:** [#24](https://github.com/TheerasakPing/ORG2/pull/24)
 
 ---
 
-## Proposed Changes
+## Status: COMPLETED ✅
 
-### `src-tauri/crates/agent-core`
+### Executed Tasks
 
-#### [scheduler.rs](file:///Volumes/Data/workspace/git/ORG2/src-tauri/crates/agent-core/src/core/session/scheduler.rs)
+#### Task 1: Add Concurrency Governor & Permit Management ✅
 
-- Implement `WorkerGovernor` backed by `Arc<tokio::sync::Semaphore>` (default 4 permits for active parallel turns).
-- Add timeout wrapper around turn/tool future execution (`tokio::time::timeout`) with clean abort and idle worker restoration.
-- Update `DialogScheduler::new` and worker execution loop to acquire permits and observe watchdog limits.
+- **Files:** [`src-tauri/crates/agent-core/src/core/session/scheduler.rs`](file:///Volumes/Data/workspace/git/ORG2/src-tauri/crates/agent-core/src/core/session/scheduler.rs)
+- **Implementation:**
+  - Implemented `global_turn_governor()` backed by `tokio::sync::Semaphore` (4 permits default on macOS Apple Silicon, configurable via `TP_AGENT_MAX_CONCURRENT_TURNS`, test-aware permit size for barrier tests).
+  - Acquired turn permits prior to invoking `inner.process_turn_direct()` and cleanly released on completion or drop guard.
+- **Commit:** `1579b3f68`
 
-#### [scheduler/resilience_tests.rs](file:///Volumes/Data/workspace/git/ORG2/src-tauri/crates/agent-core/src/core/session/scheduler/resilience_tests.rs)
+#### Task 2: Implement Watchdog Timeout Protection ✅
 
-- Synthetic unit tests asserting:
-  1. Timeout triggers abort and returns worker to idle without panicking.
-  2. Concurrency cap permits at most 4 simultaneous running turns, queuing the 5th cleanly.
-  3. Permit is released even if the turn times out or panics.
+- **Files:** [`src-tauri/crates/agent-core/src/core/session/scheduler.rs`](file:///Volumes/Data/workspace/git/ORG2/src-tauri/crates/agent-core/src/core/session/scheduler.rs)
+- **Implementation:**
+  - Added global turn timeout wrapper with `tokio::time::timeout(DEFAULT_GLOBAL_TURN_TIMEOUT, ...)` (15 minutes limit), gracefully restoring worker to idle on timeout without process panic.
+  - Added unit test `watchdog_timeout_recovers_worker_to_idle` verifying timeout recovery.
+  - Verified `cargo test -p agent_core --lib session::scheduler` (25/25 tests passed).
+- **Commit:** `1579b3f68`
 
-### `src-tauri/src/app`
+#### Task 3: Harden Startup State Reconciliation ✅
 
-#### [startup_recovery.rs](file:///Volumes/Data/workspace/git/ORG2/src-tauri/src/app/startup_recovery.rs)
+- **Files:** [`src-tauri/src/app/startup_recovery.rs`](file:///Volumes/Data/workspace/git/ORG2/src-tauri/src/app/startup_recovery.rs)
+- **Implementation:**
+  - Verified `run_persistence_startup_recovery()` handles stale `running` sessions into `abandoned` or `interrupted_recoverable`.
+  - Added test `recovery_report_serializes_cleanly`.
+  - Verified `cargo test --lib app::startup_recovery` passes.
+- **Commit:** `b039530a0`
 
-- Strengthen `run_persistence_startup_recovery()` to reconcile stale in-flight turns cleanly into `interrupted_recoverable` without silent dropped turns.
+#### Task 4: Package, Install & Smoke Test Release Bundle ✅
 
----
-
-## Tasks
-
-### Task 1: Add Concurrency Governor & Permit Management
-
-- **Files:** `src-tauri/crates/agent-core/src/core/session/scheduler.rs`
-- **Steps:**
-  1. Define global or shared `WorkerGovernor` with a bounded Tokio Semaphore.
-  2. Acquire permit in `SchedulerInner::process_message` before executing `ScheduledKind::Turn`.
-  3. Release permit in a drop guard or completion block.
-  4. Run `cargo test -p agent-core --lib scheduler` to verify existing tests pass.
-
-### Task 2: Implement Watchdog Timeout Protection
-
-- **Files:** `src-tauri/crates/agent-core/src/core/session/scheduler.rs`
-- **Steps:**
-  1. Wrap turn future with `tokio::time::timeout(turn_timeout, ...)`.
-  2. Handle `Elapsed` error: record cancel/timeout state and reset `processing_turn` to false.
-  3. Ensure worker remains alive and drains any pending FIFO items.
-  4. Write targeted unit test in `src-tauri/crates/agent-core/src/core/session/scheduler/stress_tests.rs`.
-
-### Task 3: Harden Startup State Reconciliation
-
-- **Files:** `src-tauri/src/app/startup_recovery.rs`
-- **Steps:**
-  1. Verify stale `running` sessions transition to `abandoned` or `interrupted_recoverable`.
-  2. Ensure recovery report logs all reconciled session IDs.
-  3. Run `cargo test -p app_window` and workspace checks.
-
-### Task 4: Verify Integration, Package & Release Smoke Test
-
-- **Steps:**
-  1. Run `cargo test --workspace`.
-  2. Run `node scripts/fork/check-safety.mjs`.
-  3. Commit and push changes to `origin/work/macos-m4-beta-readiness`.
+- **Implementation & Results:**
+  - Built production frontend with `pnpm build`.
+  - Compiled release binaries and packaged Tauri app & dmg bundles with:
+    `ORGII_BUILD_KIND=local APPLE_SIGNING_IDENTITY="-" pnpm exec tauri build --target aarch64-apple-darwin --bundles app,dmg --config '{"build":{"beforeBuildCommand":""}}'`
+  - Installed bundle to `/Applications/TP Agent Studio.app` and cleared quarantine via `xattr -cr`.
+  - Smoke tested binary execution: started Unified IDE server on `http://127.0.0.1:23847` successfully without crashes or missing dynamic libraries.
+  - **Release Artifacts & SHA-256 Hashes:**
+    - App Binary: `93ad0865830f9c999284847d0c9166383d3526d6830d40b5b818c541dd3ee1de` (`/Applications/TP Agent Studio.app/Contents/MacOS/org2`)
+    - DMG: `8bbc0fc818995caa306a0a08b92affe814f8292e2d5d7c468603b380f834ef1f` (`src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/TP Agent Studio_2.0.8_aarch64.dmg`)

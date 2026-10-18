@@ -107,3 +107,22 @@ pub(crate) fn dispatch_agent_org_recovery_receipts(
         wake_hook.wake_member_for_formal_receipts(COORDINATOR_MEMBER_ID, &org_run_id, &receipt_ids);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recovery_report_serializes_cleanly() {
+        let report = PersistenceStartupRecoveryReport {
+            ordinary_turn_intents_reconciled: 0,
+            agent_org_turn_intents_reconciled: 0,
+            terminal_sessions_reconciled: 0,
+            sessions_abandoned: 0,
+            agent_org: AgentOrgStartupRecoveryPlan::default(),
+        };
+        let json = serde_json::to_string(&report).expect("report serialization succeeds");
+        assert!(json.contains("ordinaryTurnIntentsReconciled"));
+        assert!(json.contains("sessionsAbandoned"));
+    }
+}

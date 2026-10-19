@@ -42,6 +42,7 @@
 - [ ] Classify transient vs permanent LLM reflection failures; TTL/backoff rather than permanent blacklist for transient errors.
 - [ ] Add session crash/restart, cancel/resume, provider-retry-after-tool and background-process teardown fault injection.
 - [x] Catch scheduler execute-factory panics, track dead worker handles, recover the queue on next enqueue, and persist failed session state; added targeted regression tests (merged in PR #23, CI run `39045829235` passed).
+- [x] **Implemented & Tested** on `work/macos-m4-beta-readiness` (`83b04d2ce`): harden conversation continuation and queue recovery in `localConversationSettledTail.ts`. Verify native transcript identity, preserve interrupted output, distinguish terminal receipts from answers, and expose pending or blocked recovery when an anchor cannot be proved. Focused settled-tail and dispatcher recovery tests passed; live-provider recovery remains unverified.
 - [x] Continue independent startup reconciliation phases after a partial failure so stale in-flight session cleanup is still attempted; see [multi-session recovery audit](SESSION_STALL_RECOVERY.md).
 - [ ] Implement bounded progress/heartbeat diagnostics for genuinely hung provider or Tool futures, with cancellation semantics that never replay side-effectful work.
 - [x] Add bounded, synthetic Rust `DialogScheduler` stress tests for 1/5/20/50 concurrent sessions, targeted cancellation, dead-worker no-replay isolation and queue capacity (CI confirmed: macOS Rust workspace tests, macOS/Windows Clippy and CodeQL passed on PR #23; real provider/tool load still unverified). See [Multi-Session Stress Lab](MULTI_SESSION_STRESS_LAB.md).
@@ -60,6 +61,8 @@
 - [x] Add passive quiet-phase advisories after 5/60 minutes for observed native turns (merged in PR #23). No automatic recovery or hang certainty.
 - [x] Add 15-second scheduler-owned heartbeat signals scoped by Turn epoch and bounded frontend monitor warnings at 45/120 seconds (merged in PR #23). This proves only Tokio task polling, not provider/tool progress or safe automatic recovery.
 - [x] Add in-app Worker Overview sourced from the actual in-memory Rust AgentAppState/DialogScheduler worker handles (merged in PR #23, synced with top-level Monitor refresh): created, live, busy, idle, dead, queue, maintenance and not-started counts. Excludes CLI/Cloud workers and does not auto-recover.
+- [x] **Implemented & Tested** on `work/macos-m4-beta-readiness` (`0ff8c489a`): integrate the Chat Panel Action Stream Feed (`TurnActionFeed`) and Changed Files Tree Card (`TurnChangedFilesTreeCard`) into the turn footer. Action extraction and folder/diff-total grouping tests passed; rendered interactions remain unverified by E2E.
+- [x] **Implemented & Tested** on `work/macos-m4-beta-readiness` (`83b04d2ce`): add the macOS/Linux window drag fallback (`windowDrag.ts`) for non-interactive drag-region descendants, excluding controls and no-drag regions. jsdom tests cover drag eligibility, click exclusions, and listener disposal; native platform dragging remains unverified in this audit.
 - [ ] Build a unified runtime dashboard: tokens, costs, tool latency, retry reason, memory queue, session CPU/RAM, pending approvals.
 - [ ] Add permissions preview and audit receipts for CLI, MCP, desktop and browser execution.
 - [ ] Improve agent-team orchestration with role capabilities, checkpoints, budgets and human approval rules.
@@ -75,6 +78,8 @@
 - [ ] Consistent UX and full localization; accessibility and performance budgets.
 
 ## CI acceptance matrix
+
+The recent branch features above passed 51 focused tests across five files on 2026-10-19. See [Recent feature status](../../FORK.md#recent-feature-status) for the exact command and coverage limits. These results do not update the platform certification matrix below or imply that the branch changes are merged into `develop`.
 
 | Platform            | Build                                     | Unit                                          | Native integration                                      | Install/upgrade                                         | UI E2E  |
 | ------------------- | ----------------------------------------- | --------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------- | ------- |

@@ -54,6 +54,26 @@ Always distinguish these five engineering milestones in issues, PRs, and release
 - **Wrapper sidecar forwarding**: `scripts/tauri/run-with-features.cjs` forwards both `--target <triple>` / `--target=<triple>` and `--profile <prof>` / `--profile=<prof>` to `scripts/tauri/prepare-sidecars.cjs`, preventing redundant host-triple rebuilds during targeted builds.
 - **Zero background polling when monitor is closed**: `LiveSessionMonitorPanel` mounts Tauri event listeners and timers only while expanded.
 
+## Recent feature status
+
+The following changes are **Implemented & Tested** on `work/macos-m4-beta-readiness` at `0ff8c489a` and `83b04d2ce`. This status records implementation and focused automated tests, not integration into `develop` or installer certification.
+
+- **Chat Panel Action Stream Feed (`TurnActionFeed`)** displays terminal commands, file reads, and file edits in the turn footer, with timestamps and expandable command output. Resource interactions provide a fallback when detailed action events are absent.
+- **Changed Files Tree Card (`TurnChangedFilesTreeCard`)** groups changed files by folder, shows file and folder addition/deletion totals, and supports folder collapse, diff navigation, and summary copying. Both components are integrated into `TurnMetadataFooter`.
+- **Window drag fallback (`src/util/platform/windowDrag.ts`)** lets non-interactive descendants of declared drag regions start native dragging on macOS and Linux. Interactive controls, explicit no-drag regions, right clicks, and double clicks are excluded. The fallback is disabled on Windows and outside Tauri desktop, and its listener can be disposed.
+- **Conversation continuation and queue recovery (`src/engines/SessionCore/conversations/localConversationSettledTail.ts`)** recovers provider-native output using turn identity or semantic-prefix and matching-user proof. Failed and cancelled turns preserve interrupted suffixes. Lifecycle-only receipts do not count as answers, and unrecoverable missing anchors reach explicit pending or blocked recovery errors instead of silent success.
+
+Verification on 2026-10-19 passed **51 tests across five files** using the command below. Chat coverage tests action extraction and file-tree grouping, not rendered interactions. Window-drag coverage uses jsdom with mocked native APIs. Continuation coverage includes settled-tail and dispatcher recovery regressions. Native macOS/Linux dragging, rendered Chat Panel E2E, live-provider recovery, lint, and typecheck were not run in this documentation audit.
+
+```bash
+pnpm exec vitest run --config config/vitest.config.ts \
+  src/engines/ChatPanel/ChatHistory/components/TurnActionFeed/__tests__/actionFeedHelpers.test.ts \
+  src/engines/ChatPanel/ChatHistory/components/TurnChangedFilesTreeCard/__tests__/fileTreeHelpers.test.ts \
+  src/util/platform/windowDrag.test.ts \
+  src/engines/SessionCore/conversations/localConversationSettledTail.test.ts \
+  src/features/ConversationContinuation/canonicalConversationDispatcher.recovery.test.ts
+```
+
 ## Known limitations
 
 1. **Synthetic vs live-provider stress coverage**: The 1, 5, 20, and 50 concurrent session stress tests in `scheduler.rs` validate real Rust `DialogScheduler` / Tokio task scheduling, cancellation, queue bounds, and dead-worker recovery under controlled offline workloads. They **do not** prove 50 concurrent live LLM API streams or external CLI subagent processes.

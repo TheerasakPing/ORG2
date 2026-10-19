@@ -54,6 +54,7 @@ import { useQueueDispatch } from "@src/engines/SessionCore/hooks/session/useQueu
 import SessionSyncProvider from "@src/engines/SessionCore/sync/SessionSyncProvider";
 import { dispatchQueuedCanonicalConversation } from "@src/features/ConversationContinuation/canonicalConversationDispatcher";
 import SessionViewersIndicator from "@src/features/Org2Cloud/SessionViewersIndicator";
+import { createLogger } from "@src/hooks/logger";
 import { useAppNavigate as useNavigate } from "@src/hooks/navigation/useAppNavigate";
 import { useMacosPageBackdropSurface } from "@src/hooks/platform/useMacosPageBackdropSurface";
 import { useNativeSessionStatusMonitor } from "@src/hooks/session/useNativeSessionStatusMonitor";
@@ -61,8 +62,11 @@ import { sessionByIdAtom } from "@src/store/session";
 import type { SessionContinuation } from "@src/store/session/sessionTabPlacementAtom";
 import { resolvedBackgroundConfigAtom } from "@src/store/ui/backgroundConfigAtom";
 import { windowFullscreenAtom } from "@src/store/ui/uiAtom";
+import { maxWindow } from "@src/util/platform/ipcRenderer";
 import { isWindows } from "@src/util/platform/tauri";
 import { isHumanSession } from "@src/util/session/sessionDispatch";
+
+const log = createLogger("SessionWindow");
 
 /** Path the detached window navigates to for one session. Must stay in sync
  *  with the Rust route in `app_window::commands::open_session_window` and the
@@ -149,21 +153,16 @@ const SessionWindowContent: React.FC<{ sessionId: string }> = memo(
     // Native full screen hides the macOS traffic lights; drop their reserve.
     const isFullscreen = useAtomValue(windowFullscreenAtom);
 
-    // The `data-tauri-drag-region` attribute only reacts to mousedowns whose
-    // TARGET carries the attribute — child elements swallow most of the row.
-    // Mirror ChatPanelHeader's collapsed-header fallback: any left-press on a
-    // non-interactive part of the header starts a native drag, and a
-    // double-press toggles maximize. Windows keeps its native title bar.
+    // Windows keeps its native title bar; the shared window drag fallback
+    // handles descendants of this header's drag region on macOS and Linux.
     const handleHeaderMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
-      if (windowsHost || event.button !== 0) return;
+      if (windowsHost || event.button !== 0 || event.detail !== 2) return;
       if (!shouldStartHeaderDragFromTarget(event.target as Element | null)) {
         return;
       }
-      const maximize = event.detail === 2;
       event.preventDefault();
-      void import("@src/util/platform/ipcRenderer").then(
-        ({ maxWindow, startWindowDrag }) =>
-          maximize ? maxWindow() : startWindowDrag()
+      void maxWindow().catch((error) =>
+        log.error("Window chrome action failed", error)
       );
     };
 

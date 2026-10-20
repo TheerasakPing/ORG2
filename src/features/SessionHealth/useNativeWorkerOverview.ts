@@ -10,7 +10,7 @@ import type { NativeWorkerOverview } from "@src/api/tauri/rpc/schemas/sessionAgg
 
 const REFRESH_MS = 60_000;
 
-export function useNativeWorkerOverview(): {
+export function useNativeWorkerOverview(refreshSignal = 0): {
   overview: NativeWorkerOverview | null;
   isLoading: boolean;
   error: boolean;
@@ -64,6 +64,14 @@ export function useNativeWorkerOverview(): {
       inFlight.current = null;
     };
   }, [refresh]);
+
+  useEffect(() => {
+    if (refreshSignal <= 0) return;
+    const timer = window.setTimeout(() => {
+      refresh().catch(() => undefined);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refresh, refreshSignal]);
 
   return { overview, isLoading, error, refresh };
 }

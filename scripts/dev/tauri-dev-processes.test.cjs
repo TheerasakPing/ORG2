@@ -69,11 +69,10 @@ test("tauri args disable beforeDevCommand after wrapper starts webpack", () => {
   assert.deepEqual(args.slice(0, 2), ["dev", "--config"]);
   const config = JSON.parse(args[2]);
   assert.deepEqual(config.build, { beforeDevCommand: "" });
-  assert.equal(config.identifier, "org2ai.org2.dev");
-  assert.equal(config.productName, "ORG2 Dev");
+  assert.equal(config.identifier, "com.theerasakping.tpagentstudio.dev");
+  assert.equal(config.productName, "TP Agent Studio Dev");
   assert.deepEqual(config.plugins["deep-link"].desktop.schemes, [
-    "yorgai-dev",
-    "orgii-dev",
+    "tpagentstudio-dev",
   ]);
   assert.equal(config.plugins.updater.active, false);
   assert.ok(config.bundle.icon.includes("icons/dev/icon.icns"));
@@ -96,7 +95,7 @@ test("tauri args preserve features and devUrl override", () => {
     "--config",
   ]);
   const config = JSON.parse(args[4]);
-  assert.equal(config.identifier, "org2ai.org2.dev");
+  assert.equal(config.identifier, "com.theerasakping.tpagentstudio.dev");
   assert.deepEqual(config.build, {
     beforeDevCommand: "",
     devUrl: "http://127.0.0.1:1998",

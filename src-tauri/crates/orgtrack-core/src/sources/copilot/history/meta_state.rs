@@ -63,11 +63,9 @@ impl CopilotMetaState {
                     self.last_model_change = Some(model);
                 }
             }
-            "user.message" => {
-                if self.first_user_text.is_none() {
-                    self.first_user_text = bounded_data_str(&event.data, "content", 1_024)
-                        .map(|text| imported_history::truncate_name(&text, 200));
-                }
+            "user.message" if self.first_user_text.is_none() => {
+                self.first_user_text = bounded_data_str(&event.data, "content", 1_024)
+                    .map(|text| imported_history::truncate_name(&text, 200));
             }
             "assistant.message" => {
                 if let Some(model) = bounded_data_str(&event.data, "model", MAX_MODEL_BYTES) {

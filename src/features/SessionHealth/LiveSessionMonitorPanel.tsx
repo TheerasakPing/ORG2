@@ -69,9 +69,9 @@ function StatusRow({
 }) {
   const color =
     row.phase === "working"
-      ? "bg-cyan-500"
+      ? "bg-gradient-to-r from-cyan-400 to-teal-300 shadow-[0_0_10px_rgba(34,211,238,0.9)] ring-2 ring-cyan-400/50 animate-pulse"
       : row.phase === "attention"
-        ? "bg-amber-500"
+        ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)]"
         : row.phase === "terminal"
           ? "bg-slate-400"
           : "bg-slate-300";
@@ -133,6 +133,7 @@ export default function LiveSessionMonitorPanel({
   const [nowMs, setNowMs] = useState(Date.now);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
+  const [workerRefreshSignal, setWorkerRefreshSignal] = useState(0);
   const [nativePhases, setNativePhases] = useState<NativePhaseMap>(
     () => new Map()
   );
@@ -204,6 +205,7 @@ export default function LiveSessionMonitorPanel({
     if (refreshing) return;
     setRefreshing(true);
     setRefreshError(false);
+    setWorkerRefreshSignal((previous) => previous + 1);
     try {
       // Explicit only: joined with the app's single-flight roster loader.
       await loadSessionRoster({ forceRefresh: true });
@@ -244,9 +246,21 @@ export default function LiveSessionMonitorPanel({
           </button>
         </div>
         <div className="mt-4 grid grid-cols-4 gap-2">
-          <div className="rounded-xl bg-fill-1 p-2 text-center">
+          <div
+            className={`rounded-xl p-2 text-center transition-all ${
+              summary.busy > 0
+                ? "border border-cyan-500/40 bg-cyan-500/10 text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.2)]"
+                : "bg-fill-1"
+            }`}
+          >
             <div className="text-xl font-bold">{summary.busy}</div>
-            <div className="text-[10px] text-text-2">กำลังทำงาน</div>
+            <div
+              className={`text-[10px] ${
+                summary.busy > 0 ? "font-medium text-cyan-300" : "text-text-2"
+              }`}
+            >
+              กำลังทำงาน
+            </div>
           </div>
           <div className="rounded-xl bg-fill-1 p-2 text-center">
             <div className="text-xl font-bold">{summary.attention}</div>
@@ -303,7 +317,7 @@ export default function LiveSessionMonitorPanel({
         )}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <NativeWorkerOverviewSection />
+        <NativeWorkerOverviewSection refreshSignal={workerRefreshSignal} />
         <p className="mb-3 text-[11px] text-text-3">
           แสดง {summary.visibleCount} จาก {summary.totalLoaded} Session
           ในรายการที่โหลดแล้ว

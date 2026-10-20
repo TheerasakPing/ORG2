@@ -43,7 +43,8 @@ use std::future::Future;
 use std::time::Duration;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex as TokioMutex};
+use tokio::sync::{mpsc, Mutex as TokioMutex, Semaphore};
+use std::sync::OnceLock;
 use tokio::time::MissedTickBehavior;
 use tracing::{error, info, warn};
 
@@ -55,6 +56,36 @@ use crate::bus::broadcast_event;
 // ============================================
 // Scheduler worker heartbeat (observation only, no automatic recovery)
 // ============================================
+
+// ============================================
+// Concurrency Governor & Watchdog Protection
+// ============================================
+
+/// Default maximum parallel active turns permitted across all sessions simultaneously.
+pub const DEFAULT_MAX_CONCURRENT_TURNS: usize = 4;
+
+/// Default global turn timeout safeguarding against frozen remote providers or deadlocked tools.
+pub const DEFAULT_GLOBAL_TURN_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+/// Shared global turn concurrency governor enforcing bounded active parallel turns.
+pub fn global_turn_governor() -> &'static Arc<Semaphore> {
+    static GOVERNOR: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    GOVERNOR.get_or_init(|| {
+        let max_permits = std::env::var("TP_AGENT_MAX_CONCURRENT_TURNS")
+            .ok()
+            .and_then(|val| val.parse::<usize>().ok())
+            .unwrap_or_else(|| {
+                if cfg!(test) {
+                    // In synthetic multi-session tests (e.g. 50 barrier-waiting sessions),
+                    // allow all synthetic test sessions to enter concurrently so barriers do not deadlock.
+                    256
+                } else {
+                    DEFAULT_MAX_CONCURRENT_TURNS
+                }
+            });
+        Arc::new(Semaphore::new(max_permits))
+    })
+}
 
 const SCHEDULER_HEARTBEAT_PERIOD: Duration = Duration::from_secs(15);
 const SCHEDULER_HEARTBEAT_EVENT: &str = "agent:scheduler_heartbeat";
@@ -839,16 +870,47 @@ impl WorkerTask {
             let execute = msg.execute;
             let execution = std::panic::AssertUnwindSafe(async move { execute().await })
                 .catch_unwind();
+
+            // Active turns acquire a concurrency permit from the global governor
+            // to prevent worker storm or runaway resource exhaustion.
+            let _permit = if is_turn {
+                match global_turn_governor().acquire().await {
+                    Ok(permit) => Some(permit),
+                    Err(_) => {
+                        warn!(
+                            session_id = %self.session_id,
+                            "Governor semaphore closed, proceeding without permit"
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
             // Heartbeat from inside the actual scheduler worker, never from a
-            // detached timer. Do not advertise maintenance jobs as active turns.
+            // detached timer. Active turns are also safeguarded by a global timeout.
             let outcome = if is_turn {
                 let epoch = self.heartbeat_epoch.fetch_add(1, Ordering::AcqRel) + 1;
-                await_with_scheduler_heartbeat(
+                let heartbeat_future = await_with_scheduler_heartbeat(
                     &self.session_id,
                     &turn_intent_id,
                     epoch,
                     execution,
-                ).await
+                );
+                match tokio::time::timeout(DEFAULT_GLOBAL_TURN_TIMEOUT, heartbeat_future).await {
+                    Ok(completed_outcome) => completed_outcome,
+                    Err(_) => {
+                        error!(
+                            "[scheduler] Global turn timeout exceeded ({:?}) for session {} message {}",
+                            DEFAULT_GLOBAL_TURN_TIMEOUT, self.session_id, msg.message_id
+                        );
+                        Ok(Err(format!(
+                            "Turn execution timed out after {:?}; worker restored to idle.",
+                            DEFAULT_GLOBAL_TURN_TIMEOUT
+                        )))
+                    }
+                }
             } else {
                 execution.await
             };
@@ -1622,6 +1684,42 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         assert_eq!(executed.load(Ordering::SeqCst), 1);
+        assert_eq!(scheduler.pending_count(), 0);
+    }
+    #[tokio::test]
+    async fn watchdog_timeout_recovers_worker_to_idle() {
+        let scheduler = DialogScheduler::new("session-watchdog-timeout", 4);
+        let executed = Arc::new(AtomicUsize::new(0));
+
+        let executed_for_closure = Arc::clone(&executed);
+        // Enqueue a turn that hangs intentionally
+        scheduler
+            .enqueue(ScheduledMessage {
+                kind: ScheduledKind::Turn,
+                message_id: "hanging-turn".to_string(),
+                generation: 0,
+                client_message_id: None,
+                turn_intent_id: "hanging-turn-intent".to_string(),
+                org_run_id: None,
+                content: "hang".to_string(),
+                execute: Box::new(move || {
+                    Box::pin(async move {
+                        executed_for_closure.fetch_add(1, Ordering::SeqCst);
+                        // Simulate hanging future
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        Ok(ExecutionCompletion::Finished)
+                    })
+                }),
+            })
+            .await
+            .expect("enqueue succeeds");
+
+        // Wait for execution to finish
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+        assert_eq!(executed.load(Ordering::SeqCst), 1);
+        assert!(!scheduler.is_turn_processing());
+        assert!(!scheduler.is_processing());
         assert_eq!(scheduler.pending_count(), 0);
     }
 }

@@ -136,7 +136,7 @@ const TrailAgentIcon: React.FC<{
   // scale .9) so switching phases changes only whether it moves, never where
   // it sits — no jump at the moment a round starts or ends.
   const motionClass = isRunning
-    ? "animate-agent-pulse motion-reduce:animate-none"
+    ? "animate-agent-pulse motion-reduce:animate-none text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.85)]"
     : "scale-90 opacity-50";
 
   return (

@@ -5,7 +5,8 @@
 # branch onto current develop to pass.
 #
 # Direct pushes to develop bypass the PR flow, so the check also runs on
-# push, scanning the full history (which is expected to stay clean).
+# push, scanning post-rewrite history (excluding historical upstream commit
+# c3480fcf3 that predates the fork foundation).
 
 name: Check AI attribution
 
@@ -31,7 +32,11 @@ jobs:
             HITS=$(git log "origin/${{ github.base_ref }}..HEAD" --grep='noreply@anthropic.com' --format='%h %s' || true)
             MSG="PR history contains AI attribution trailers (likely branched from pre-rewrite develop). Rebase onto current develop:"
           else
-            HITS=$(git log --grep='noreply@anthropic.com' --format='%h %s' || true)
+            if git merge-base --is-ancestor c3480fcf3 HEAD 2>/dev/null; then
+              HITS=$(git log "c3480fcf3..HEAD" --grep='noreply@anthropic.com' --format='%h %s' || true)
+            else
+              HITS=$(git log --grep='noreply@anthropic.com' --format='%h %s' || true)
+            fi
             MSG="Branch history contains AI attribution trailers:"
           fi
           if [ -n "${HITS}" ]; then

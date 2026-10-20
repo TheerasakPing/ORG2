@@ -174,7 +174,7 @@ const InputActions: React.FC<InputActionsProps> = memo(
         : activeButtonClass
       : showStop
         ? canStopAgent
-          ? INPUT_AREA_BUTTONS.iconButtonActive
+          ? `${INPUT_AREA_BUTTONS.iconButtonActive} shadow-[0_0_12px_rgba(6,182,212,0.85)] ring-2 ring-cyan-400/60 animate-pulse`
           : "cursor-not-allowed border border-solid border-border-2 bg-transparent text-text-3 opacity-50"
         : showRetry
           ? "cursor-pointer border-none bg-warning-6 text-white hover:bg-warning-5"

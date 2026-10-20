@@ -4,7 +4,7 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-function runWrapper(subcommand) {
+function runWrapperCalls(subcommand, extraArgs = []) {
   const calls = [];
   vm.runInNewContext(
     fs.readFileSync(path.join(__dirname, "run-with-features.cjs"), "utf8"),
@@ -12,7 +12,7 @@ function runWrapper(subcommand) {
       __dirname,
       console,
       process: {
-        argv: ["node", "wrapper", subcommand],
+        argv: ["node", "wrapper", subcommand, ...extraArgs],
         env: {},
         execPath: process.execPath,
         exit: () => {},
@@ -30,23 +30,29 @@ function runWrapper(subcommand) {
       },
     }
   );
-  return calls.find(({ command }) => command === "tauri");
+  return calls;
+}
+
+function runWrapper(subcommand, extraArgs = []) {
+  return runWrapperCalls(subcommand, extraArgs).find(
+    ({ command }) => command === "tauri"
+  );
 }
 
 test("dev-only entry point passes the dev identity and frontend environment", () => {
   const { args, options } = runWrapper("dev");
   const configPath = args[args.indexOf("--config") + 1];
   const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-  assert.equal(config.identifier, "org2ai.org2.dev");
+  assert.equal(config.identifier, "com.theerasakping.tpagentstudio.dev");
   assert.ok(config.bundle.icon.includes("icons/dev/icon.png"));
   assert.equal(
     config.build,
     undefined,
     "Tauri must still start its frontend hook"
   );
-  assert.equal(options.env.ORGII_IDE_SERVER_PORT, "13946");
-  assert.equal(options.env.ORGII_CLI_PROXY_PORT, "17987");
-  assert.equal(options.env.ORGII_DEEP_LINK_SCHEME, "orgii-dev");
+  assert.equal(options.env.ORGII_IDE_SERVER_PORT, "23946");
+  assert.equal(options.env.ORGII_CLI_PROXY_PORT, "27987");
+  assert.equal(options.env.ORGII_DEEP_LINK_SCHEME, "tpagentstudio-dev");
 });
 
 test("production builds keep their existing identity and environment", () => {
@@ -54,4 +60,22 @@ test("production builds keep their existing identity and environment", () => {
   assert.equal(args.includes("--config"), false);
   assert.equal(options.env.ORGII_IDE_SERVER_PORT, undefined);
   assert.equal(options.env.ORGII_DEEP_LINK_SCHEME, undefined);
+});
+
+test("build wrapper forwards explicit --target and --profile to prepare-sidecars", () => {
+  const calls = runWrapperCalls("build", [
+    "--target=aarch64-apple-darwin",
+    "--profile",
+    "release",
+    "--bundles",
+    "dmg",
+  ]);
+  const sidecarCall = calls.find(({ command }) => command === process.execPath);
+  assert.ok(sidecarCall, "prepare-sidecars should be invoked before tauri");
+  assert.deepEqual(sidecarCall.args.slice(1), [
+    "--profile",
+    "release",
+    "--target",
+    "aarch64-apple-darwin",
+  ]);
 });

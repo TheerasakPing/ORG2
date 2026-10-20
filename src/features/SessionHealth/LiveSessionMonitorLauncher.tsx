@@ -22,7 +22,13 @@ export function LiveSessionMonitorLauncher(): React.ReactElement {
         onClick={() => setOpen((value) => !value)}
         className="pointer-events-auto flex items-center gap-2 rounded-full border border-border-2 bg-bg-2 px-3 py-2 text-xs font-semibold text-text-1 shadow-lg transition-colors hover:bg-fill-1"
       >
-        <span aria-hidden className="h-2 w-2 rounded-full bg-cyan-500" />
+        <span
+          aria-hidden
+          className="relative flex h-2.5 w-2.5 items-center justify-center"
+        >
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400 opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-gradient-to-tr from-cyan-500 to-emerald-400 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
+        </span>
         Session Monitor
       </button>
       {open && (

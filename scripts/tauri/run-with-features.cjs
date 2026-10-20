@@ -39,18 +39,35 @@ args.push(...extraArgs);
 
 const rootDir = path.join(__dirname, "..", "..");
 
+function findOptionValue(argv, flag) {
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (token === flag && argv[i + 1]) {
+      return argv[i + 1];
+    }
+    if (typeof token === "string" && token.startsWith(`${flag}=`)) {
+      const value = token.slice(flag.length + 1);
+      if (value) return value;
+    }
+  }
+  return null;
+}
+
 // `externalBin` requires the staged org2-pm sidecar to exist before the
 // tauri CLI starts (dev copies it next to the debug binary; build bundles
 // and signs it).
 if (subcommand === "dev" || subcommand === "build") {
-  const targetIndex = extraArgs.indexOf("--target");
+  const explicitTarget = findOptionValue(extraArgs, "--target");
+  const explicitProfile = findOptionValue(extraArgs, "--profile");
+  const sidecarProfile =
+    explicitProfile ?? (subcommand === "build" ? "release" : "debug");
   const sidecarArgs = [
     path.join(__dirname, "prepare-sidecars.cjs"),
     "--profile",
-    subcommand === "build" ? "release" : "debug",
+    sidecarProfile,
   ];
-  if (targetIndex >= 0 && extraArgs[targetIndex + 1]) {
-    sidecarArgs.push("--target", extraArgs[targetIndex + 1]);
+  if (explicitTarget) {
+    sidecarArgs.push("--target", explicitTarget);
   }
   const sidecarResult = spawnSync(process.execPath, sidecarArgs, {
     stdio: "inherit",

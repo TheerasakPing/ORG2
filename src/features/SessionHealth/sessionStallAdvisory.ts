@@ -41,14 +41,16 @@ export function phaseAdvisory(
     return {
       state: "expired",
       elapsedMs: delta,
-      message: "ไม่พบ Event ขั้นตอนใหม่เป็นเวลานาน · ตรวจสอบ Logs และสถานะ Runtime",
+      message:
+        "ไม่พบ Event ขั้นตอนใหม่เป็นเวลานาน · ตรวจสอบ Logs และสถานะ Runtime",
     };
   }
   if (delta >= PHASE_SILENCE_WARNING_MS) {
     return {
       state: "quiet",
       elapsedMs: delta,
-      message: "ไม่มีการเปลี่ยนขั้นตอนช่วงหนึ่ง · อาจรอ Provider หรือ Tool ตามปกติ",
+      message:
+        "ไม่มีการเปลี่ยนขั้นตอนช่วงหนึ่ง · อาจรอ Provider หรือ Tool ตามปกติ",
     };
   }
   return {

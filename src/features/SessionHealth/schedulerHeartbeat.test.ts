@@ -1,31 +1,45 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  countSchedulerPulseHealth,
-  ingestSchedulerPulse,
   MAX_SCHEDULER_HEARTBEAT_RECORDS,
-  schedulerPulseHealth,
-  schedulerPulseMessage,
   SCHEDULER_HEARTBEAT_LATE_MS,
   SCHEDULER_HEARTBEAT_MISSING_MS,
   type SchedulerPulseMap,
+  countSchedulerPulseHealth,
+  ingestSchedulerPulse,
+  schedulerPulseHealth,
+  schedulerPulseMessage,
 } from "./schedulerHeartbeat";
 
 const pulse = (
-  sessionId: string, epoch: number, sequence: number, state = "alive"
+  sessionId: string,
+  epoch: number,
+  sequence: number,
+  state = "alive"
 ) => ({
-  sessionId, turnIntentId: "intent-" + epoch, epoch, sequence, state,
-  prompt: "SECRET-PROMPT", toolArgs: "private API key", providerUrl: "https://secret",
+  sessionId,
+  turnIntentId: "intent-" + epoch,
+  epoch,
+  sequence,
+  state,
+  prompt: "SECRET-PROMPT",
+  toolArgs: "private API key",
+  providerUrl: "https://secret",
 });
 
 describe("scheduler heartbeat observation", () => {
   it("accepts a minimal heartbeat without storing private data", () => {
     const map = ingestSchedulerPulse(new Map(), pulse("s", 7, 0), 1_000);
     expect(map.get("s")).toEqual({
-      turnIntentId: "intent-7", epoch: 7, sequence: 0,
-      state: "alive", observedAtMs: 1_000,
+      turnIntentId: "intent-7",
+      epoch: 7,
+      sequence: 0,
+      state: "alive",
+      observedAtMs: 1_000,
     });
-    expect(JSON.stringify([...map.values()])).not.toMatch(/SECRET|private API|secret/);
+    expect(JSON.stringify([...map.values()])).not.toMatch(
+      /SECRET|private API|secret/
+    );
   });
 
   it("deduplicates repeated ticks without falsely refreshing their age", () => {
@@ -41,7 +55,9 @@ describe("scheduler heartbeat observation", () => {
     const old = ingestSchedulerPulse(new Map(), pulse("s", 1, 5), 1000);
     const fresh = ingestSchedulerPulse(old, pulse("s", 2, 0), 1100);
     expect(ingestSchedulerPulse(fresh, pulse("s", 1, 6), 1200)).toBe(fresh);
-    expect(ingestSchedulerPulse(fresh, pulse("s", 1, 7, "finished"), 1300)).toBe(fresh);
+    expect(
+      ingestSchedulerPulse(fresh, pulse("s", 1, 7, "finished"), 1300)
+    ).toBe(fresh);
     expect(fresh.get("s")?.epoch).toBe(2);
   });
 
@@ -65,7 +81,8 @@ describe("scheduler heartbeat observation", () => {
   it("rejects malformed state, nonfinite numbers and oversized IDs", () => {
     const current = ingestSchedulerPulse(new Map(), pulse("s", 2, 1), 1000);
     const invalid = [
-      null, {},
+      null,
+      {},
       { ...pulse("s", 1, 0), sessionId: "" },
       { ...pulse("s", 1, 0), sessionId: "x".repeat(257) },
       { ...pulse("s", 1, 0), state: "blocked" },
@@ -78,28 +95,40 @@ describe("scheduler heartbeat observation", () => {
     for (const item of invalid) {
       expect(ingestSchedulerPulse(current, item, 2000)).toBe(current);
     }
-    expect(ingestSchedulerPulse(current, pulse("s", 3, 0), Number.NaN)).toBe(current);
+    expect(ingestSchedulerPulse(current, pulse("s", 3, 0), Number.NaN)).toBe(
+      current
+    );
   });
 
   it("classifies 45/120-second silence with unknown for absent and terminal", () => {
     const m = ingestSchedulerPulse(new Map(), pulse("s", 3, 1), 1000);
     const e = m.get("s");
     expect(schedulerPulseHealth(e, 1000)).toBe("recent");
-    expect(schedulerPulseHealth(e, 1000 + SCHEDULER_HEARTBEAT_LATE_MS - 1)).toBe("recent");
-    expect(schedulerPulseHealth(e, 1000 + SCHEDULER_HEARTBEAT_LATE_MS)).toBe("late");
-    expect(schedulerPulseHealth(e, 1000 + SCHEDULER_HEARTBEAT_MISSING_MS)).toBe("missing");
+    expect(
+      schedulerPulseHealth(e, 1000 + SCHEDULER_HEARTBEAT_LATE_MS - 1)
+    ).toBe("recent");
+    expect(schedulerPulseHealth(e, 1000 + SCHEDULER_HEARTBEAT_LATE_MS)).toBe(
+      "late"
+    );
+    expect(schedulerPulseHealth(e, 1000 + SCHEDULER_HEARTBEAT_MISSING_MS)).toBe(
+      "missing"
+    );
     expect(schedulerPulseHealth(e, 999)).toBe("unknown");
     expect(schedulerPulseHealth(undefined, 9999)).toBe("unknown");
     expect(schedulerPulseMessage("missing")).toContain("ไม่ยืนยันว่า Deadlock");
   });
 
   it("tracks each loaded native session at most once", () => {
-    let m: SchedulerPulseMap = ingestSchedulerPulse(new Map(), pulse("recent", 1, 0), 100);
+    let m: SchedulerPulseMap = ingestSchedulerPulse(
+      new Map(),
+      pulse("recent", 1, 0),
+      100
+    );
     m = ingestSchedulerPulse(m, pulse("late", 1, 0), 100);
     const now = 100 + SCHEDULER_HEARTBEAT_LATE_MS;
-    expect(countSchedulerPulseHealth(
-      ["recent", "recent", "late", "unseen"], m, now
-    )).toEqual({ recent: 0, late: 2, missing: 0, unknown: 1 });
+    expect(
+      countSchedulerPulseHealth(["recent", "recent", "late", "unseen"], m, now)
+    ).toEqual({ recent: 0, late: 2, missing: 0, unknown: 1 });
   });
 
   it("bounds observations to 128 entries, including turn tombstones", () => {

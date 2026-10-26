@@ -5,24 +5,40 @@
 import type { AgentLiveStatus } from "@src/api/tauri/rpc/schemas/agentOrgs";
 import type { Session } from "@src/store/session/sessionAtom/types";
 
-import { nativePhaseDescription, type NativePhaseMap } from "./nativePhaseEvents";
+import {
+  type NativePhaseMap,
+  nativePhaseDescription,
+} from "./nativePhaseEvents";
 
 const BUSY_STATUSES = new Set([
-  "running", "in_progress", "installing", "pending", "queued",
+  "running",
+  "in_progress",
+  "installing",
+  "pending",
+  "queued",
   "waiting_for_funds",
 ]);
-const ATTENTION_STATUSES = new Set([
-  "waiting_for_user", "paused",
-]);
+const ATTENTION_STATUSES = new Set(["waiting_for_user", "paused"]);
 const TERMINAL_STATUSES = new Set([
-  "completed", "failed", "error", "cancelled",
-  "abandoned", "timeout", "killed", "archived",
+  "completed",
+  "failed",
+  "error",
+  "cancelled",
+  "abandoned",
+  "timeout",
+  "killed",
+  "archived",
 ]);
 
 export const MAX_LIVE_MONITOR_ROWS = 50;
 export const PERSISTED_STATUS_AGE_WARNING_MS = 10 * 60 * 1000;
 
-export type MonitorPhase = "working" | "attention" | "idle" | "terminal" | "unknown";
+export type MonitorPhase =
+  | "working"
+  | "attention"
+  | "idle"
+  | "terminal"
+  | "unknown";
 
 export interface LiveSessionRow {
   id: string;
@@ -74,7 +90,10 @@ export function deriveLiveSessionSummary(
 ): LiveSessionSummary {
   const nowMs = options.nowMs ?? Date.now();
   const activeOnly = options.activeOnly ?? true;
-  const limit = Math.max(1, Math.min(MAX_LIVE_MONITOR_ROWS, options.maxRows ?? MAX_LIVE_MONITOR_ROWS));
+  const limit = Math.max(
+    1,
+    Math.min(MAX_LIVE_MONITOR_ROWS, options.maxRows ?? MAX_LIVE_MONITOR_ROWS)
+  );
   let busy = 0;
   let attention = 0;
   let olderStatus = 0;
@@ -101,28 +120,40 @@ export function deriveLiveSessionSummary(
       nowMs - updatedAtMs >= PERSISTED_STATUS_AGE_WARNING_MS;
     if (oldPersistedStatus) olderStatus++;
 
-    const tool = hook?.status === "running" ? safeToolName(hook.toolName) : null;
+    const tool =
+      hook?.status === "running" ? safeToolName(hook.toolName) : null;
     // The status remains Rust/CLI-owned. Only the visible detail is enhanced
     // with the last observed content-free native execution transition.
-    const native = hook ? undefined : options.nativePhases?.get(session.session_id);
+    const native = hook
+      ? undefined
+      : options.nativePhases?.get(session.session_id);
     const observedNative = phase === "working" ? native : undefined;
     const detail = observedNative
       ? nativePhaseDescription(observedNative.phase, observedNative.tool)
       : hook
-      ? hook.status === "waiting_for_user"
-        ? "CLI hook: waiting for user"
-        : tool
-          ? "CLI tool: " + tool
-          : "CLI hook status · step unspecified"
-      : "Persisted Rust/session status · provider/tool step unknown";
+        ? hook.status === "waiting_for_user"
+          ? "CLI hook: waiting for user"
+          : tool
+            ? "CLI tool: " + tool
+            : "CLI hook status · step unspecified"
+        : "Persisted Rust/session status · provider/tool step unknown";
 
     rows.push({
       id: session.session_id,
-      title: (session.displayLabel || session.name || session.agentDisplayName || "Untitled session").slice(0, 90),
+      title: (
+        session.displayLabel ||
+        session.name ||
+        session.agentDisplayName ||
+        "Untitled session"
+      ).slice(0, 90),
       status,
       phase,
       detail,
-      source: hook ? "cli-hook" : observedNative ? "native-phase" : "session-roster",
+      source: hook
+        ? "cli-hook"
+        : observedNative
+          ? "native-phase"
+          : "session-roster",
       oldPersistedStatus,
       updatedAtMs,
     });
@@ -130,12 +161,17 @@ export function deriveLiveSessionSummary(
 
   const totalLoaded = rows.length;
   const priority: Record<MonitorPhase, number> = {
-    working: 0, attention: 1, idle: 2, unknown: 3, terminal: 4,
+    working: 0,
+    attention: 1,
+    idle: 2,
+    unknown: 3,
+    terminal: 4,
   };
-  rows.sort((a, b) =>
-    priority[a.phase] - priority[b.phase] ||
-    (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0) ||
-    a.id.localeCompare(b.id)
+  rows.sort(
+    (a, b) =>
+      priority[a.phase] - priority[b.phase] ||
+      (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0) ||
+      a.id.localeCompare(b.id)
   );
   return {
     rows: rows.slice(0, limit),

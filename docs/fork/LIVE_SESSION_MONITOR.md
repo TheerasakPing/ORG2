@@ -107,6 +107,53 @@ a slow model, blocked network, paused OS, or a hung future; the Monitor
 must not claim to have determined which. The panel also cannot reconstruct
 the phase of an already-running turn if it was opened after the transition.
 
+## V3 — Evidence-based progress pulses and quiet-period advisory (stacked PR)
+
+While a Rust agent is producing real provider output, the turn event handler
+emits a sparse **`agent:monitor_progress`** signal. Sources are
+`on_message_delta`, `on_thinking_delta` and actual tool-call stream
+deltas. No pulse is emitted from a mere periodic timer, idle UI repaint or
+SQLite timestamp update.
+
+- Throttle: at most **one IPC progress pulse every 10 seconds per owning
+  handler**, using a monotonic Rust clock and an atomic compare/exchange.
+- Event payload: only `sessionId`, `turnId` and enum
+  `kind=response_delta`. No response text, tokens, reasoning, tool-call
+  arguments, result, file path or API keys cross the new monitor channel.
+- Turn cancellation/generation and Group projection boundary checks apply.
+  A new provider request resets the per-handler throttle so the first actual
+  delta in that request is observed promptly.
+- Frontend accepts a pulse **only** for the same live session + turn, with
+  the current phase still `provider_request`; rejects stale, unscoped and
+  malformed payloads. It records **last actual delta receipt time**, not a
+  fabricated backend heartbeat or liveness proof.
+- The monitor reads these signals only while opened. The existing
+  30-second panel-only clock recomputes *advisory* thresholds, with no
+  separate polling and no changes to the Rust scheduler itself.
+
+| Situation | Threshold | UI interpretation |
+| --- | --- | --- |
+| Rust entered Provider request, no response delta | 90s | Provider may be slow; ask user to investigate. |
+| Provider previously sent deltas, now silent | 120s | No recent output received; cannot prove it hung. |
+| Rust started Tool execution, no result callback | 300s | Tool still pending; could legitimately be long-running. |
+| Session waiting for user or terminal | None | No false provider/Tool quiet warning. |
+| No observed native event (panel opened late) | None | State unknown; do not guess. |
+
+There is **no automatic stop, timeout, retry, kill, database change or
+tool replay** in V3. A busy process with zero new tokens may still be
+correctly computing; OS sleep, offline mode and an unloaded monitor can
+also change time observations. Use this as a diagnostic clue, not as an
+availability SLO.
+
+```bash
+pnpm exec vitest run src/features/SessionHealth/progressAssessment.test.ts \
+  src/features/SessionHealth/nativePhaseEvents.test.ts \
+  src/features/SessionHealth/liveSessionMonitorModel.test.ts
+```
+
+Synthetic fixture counts of 1/5/20/50 are only **in-memory projection
+tests**, not real concurrent Rust/Provider work; native multi-session stress
+and safe cancellation/fault injection remain required.
 ## V3 — passive phase-silence advisories (stacked PR)
 
 While the panel is **open**, each observed native turn receives a local,
@@ -171,7 +218,7 @@ This PR does not add proactive worker recovery and does not certify
 a recovered native turn across app restart.
 
 **Next phases** (not included in v1):
-1. Rust-native **session-scoped** provider/tool periodic heartbeat, with a
+1. Rust-native **session-scoped** scheduler/watchdog heartbeat distinct from response progress, with a
    monotonic per-turn generation and a bounded event schema that never
    includes tool args or prompts.
 2. Explicit `waiting_for_provider`, `executing_tool`, retry/error,

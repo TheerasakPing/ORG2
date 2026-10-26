@@ -15,9 +15,11 @@ import {
 } from "./liveSessionMonitorModel";
 import {
   NATIVE_PHASE_EVENT,
+  NATIVE_PROGRESS_EVENT,
   type NativePhaseMap,
   clearNativePhase,
   ingestNativePhase,
+  ingestNativeProgress,
 } from "./nativePhaseEvents";
 import {
   SCHEDULER_HEARTBEAT_EVENT,
@@ -105,6 +107,11 @@ function StatusRow({
               {workerPulseNote}
             </p>
           )}
+          {row.quietWarning && (
+            <p className="mt-1 text-[11px] text-amber-600" role="status">
+              ⚠ {row.quietWarning}
+            </p>
+          )}
           {row.oldPersistedStatus && (
             <p className="mt-1 text-[11px] text-amber-600">
               ข้อมูลสถานะในฐานข้อมูลเก่ากว่า 10 นาที · ตรวจสอบเพิ่มเติม
@@ -140,6 +147,9 @@ export default function LiveSessionMonitorPanel({
   });
   useTauriListen<unknown>(NATIVE_PHASE_EVENT, (payload) => {
     setNativePhases((previous) => ingestNativePhase(previous, payload));
+  });
+  useTauriListen<unknown>(NATIVE_PROGRESS_EVENT, (payload) => {
+    setNativePhases((previous) => ingestNativeProgress(previous, payload));
   });
   useTauriListen<unknown>("agent:complete", (payload) => {
     setNativePhases((previous) => clearNativePhase(previous, payload));
@@ -231,7 +241,7 @@ export default function LiveSessionMonitorPanel({
             ✕
           </button>
         </div>
-        <div className="mt-4 grid grid-cols-3 gap-2">
+        <div className="mt-4 grid grid-cols-4 gap-2">
           <div className="rounded-xl bg-fill-1 p-2 text-center">
             <div className="text-xl font-bold">{summary.busy}</div>
             <div className="text-[10px] text-text-2">กำลังทำงาน</div>
@@ -239,6 +249,10 @@ export default function LiveSessionMonitorPanel({
           <div className="rounded-xl bg-fill-1 p-2 text-center">
             <div className="text-xl font-bold">{summary.attention}</div>
             <div className="text-[10px] text-text-2">รอผู้ใช้ / Paused</div>
+          </div>
+          <div className="rounded-xl bg-fill-1 p-2 text-center">
+            <div className="text-xl font-bold">{summary.quietSignals}</div>
+            <div className="text-[10px] text-text-2">สัญญาณเงียบ</div>
           </div>
           <div className="rounded-xl bg-fill-1 p-2 text-center">
             <div className="text-xl font-bold">{summary.olderStatus}</div>
@@ -336,6 +350,11 @@ export default function LiveSessionMonitorPanel({
         <p>
           “ข้อมูลเก่า” = เวลาบันทึกสถานะเก่า ไม่ใช่หลักฐานว่า Provider/Tool ค้าง
         </p>
+        <p>
+          Rust Provider/Tool + Progress Pulse จริง · ส่งเฉพาะข้อมูลสถานะ
+          ไม่ส่งเนื้อหา
+        </p>
+        <p>“สัญญาณเงียบ” ไม่เท่ากับ Hang · ไม่สั่งหยุดหรือรันงานซ้ำอัตโนมัติ</p>
       </footer>
     </section>
   );

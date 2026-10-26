@@ -9,6 +9,7 @@ import {
   type NativePhaseMap,
   nativePhaseDescription,
 } from "./nativePhaseEvents";
+import { assessNativeProgress } from "./progressAssessment";
 
 const BUSY_STATUSES = new Set([
   "running",
@@ -51,6 +52,8 @@ export interface LiveSessionRow {
   /** Only means the persisted row has not updated recently; NOT a hang. */
   oldPersistedStatus: boolean;
   updatedAtMs: number | null;
+  /** Warning only: no proof of a stalled provider or tool. */
+  quietWarning: string | null;
 }
 
 export interface LiveSessionSummary {
@@ -60,6 +63,7 @@ export interface LiveSessionSummary {
   busy: number;
   attention: number;
   olderStatus: number;
+  quietSignals: number;
   truncated: boolean;
 }
 
@@ -97,6 +101,7 @@ export function deriveLiveSessionSummary(
   let busy = 0;
   let attention = 0;
   let olderStatus = 0;
+  let quietSignals = 0;
   const rows: LiveSessionRow[] = [];
 
   // The app-wide session roster is already paginated. Do not trigger a
@@ -128,6 +133,10 @@ export function deriveLiveSessionSummary(
       ? undefined
       : options.nativePhases?.get(session.session_id);
     const observedNative = phase === "working" ? native : undefined;
+    const assessment = assessNativeProgress(observedNative, nowMs);
+    const quietWarning =
+      assessment.level === "quiet" ? assessment.warning : null;
+    if (quietWarning) quietSignals++;
     const detail = observedNative
       ? nativePhaseDescription(observedNative.phase, observedNative.tool)
       : hook
@@ -156,6 +165,7 @@ export function deriveLiveSessionSummary(
           : "session-roster",
       oldPersistedStatus,
       updatedAtMs,
+      quietWarning,
     });
   }
 
@@ -180,6 +190,7 @@ export function deriveLiveSessionSummary(
     busy,
     attention,
     olderStatus,
+    quietSignals,
     truncated: totalLoaded > limit,
   };
 }

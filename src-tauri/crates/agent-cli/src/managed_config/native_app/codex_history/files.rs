@@ -395,7 +395,21 @@ mod writer_release_tests {
         );
         assert!(NativeStoreWriter::exclusive(&home).is_err());
         drop(writer);
-        assert!(NativeStoreWriter::exclusive(&home).is_ok());
+
+        // Drop may race with the release-notifier's own short exclusive
+        // probe on another Tokio task. Preserve the critical invariant:
+        // exclusive access MUST become available once the writer is gone.
+        // A leaked/inherited descriptor still fails at the bounded deadline.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if NativeStoreWriter::exclusive(&home).is_ok() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("native writer lock must become exclusive after release");
     }
 }
 

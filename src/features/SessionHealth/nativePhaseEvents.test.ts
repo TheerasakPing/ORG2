@@ -28,6 +28,7 @@ describe("native Rust session phase events", () => {
       phase: "provider_request",
       tool: null,
       observedAtMs: 1000,
+      lastProgressAtMs: null,
     });
     expect(nativePhaseDescription("provider_request", null)).toContain(
       "heartbeat"

@@ -42,7 +42,8 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::time::Instant;
 use std::sync::{Arc, Mutex};
 use tracing::warn;
 
@@ -104,12 +105,39 @@ mod monitor_phase_payload_tests {
     }
 
     #[test]
+    fn progress_throttle_is_bounded_and_non_duplicating() {
+        use super::should_emit_monitor_progress;
+        use std::sync::atomic::AtomicU64;
+        let last = AtomicU64::new(0);
+        assert!(should_emit_monitor_progress(&last, 0));
+        assert!(!should_emit_monitor_progress(&last, 9999));
+        assert!(should_emit_monitor_progress(&last, 10_000));
+        assert!(!should_emit_monitor_progress(&last, 10_001));
+        assert!(should_emit_monitor_progress(&last, 20_100));
+    }
+
+    #[test]
     fn rejects_tool_names_that_could_expose_private_arguments() {
         for unsafe_name in ["Read SECRET=token", "/absolute/path", "foo\\npassword", "🙈"] {
             let payload = monitor_phase_payload("s", None, "tool_executing", Some(unsafe_name));
             assert!(payload["tool"].is_null());
         }
     }
+}
+
+// Emit at most one content-free progress pulse per 10 seconds per handler.
+// This records actual provider output callbacks, NOT periodic task liveness.
+const MONITOR_PROGRESS_INTERVAL_MS: u64 = 10_000;
+
+fn should_emit_monitor_progress(last: &AtomicU64, elapsed_ms: u64) -> bool {
+    // Zero means no prior event. +1 avoids confusion at elapsed=0ms.
+    let tick = elapsed_ms.saturating_add(1);
+    let observed = last.load(Ordering::Relaxed);
+    if observed != 0 && tick.saturating_sub(observed) < MONITOR_PROGRESS_INTERVAL_MS {
+        return false;
+    }
+    last.compare_exchange(observed, tick, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
 }
 
 fn tool_result_is_error(result: &str) -> bool {
@@ -251,6 +279,9 @@ pub struct UnifiedEventHandler {
     /// Latest context-usage token count observed via `on_context_usage`.
     /// Feeds the Stop hook's `ORGII_TOTAL_TOKENS` env var.
     last_context_tokens: std::sync::atomic::AtomicI64,
+    /// Per-handler monotonic clock and atomic throttle for *real* provider deltas.
+    monitor_progress_since: Instant,
+    monitor_progress_last: AtomicU64,
     /// The lifecycle gate may block completion at most once per logical turn.
     /// A second miss is reported durably to the coordinator by `MemberIdle`
     /// rather than looping the provider.
@@ -268,6 +299,29 @@ struct PlanDraftStream {
 }
 
 impl UnifiedEventHandler {
+    fn broadcast_monitor_progress(&self, session_id: &str) {
+        if self.config.group_projection_only
+            || self.config.app_handle.is_none()
+            || self.is_cancelled()
+            || !self.is_current_turn_generation()
+        {
+            return;
+        }
+        let elapsed_ms = self.monitor_progress_since.elapsed().as_millis() as u64;
+        if !should_emit_monitor_progress(&self.monitor_progress_last, elapsed_ms) {
+            return;
+        }
+        // Never send the token/chunk content, token count, prompts or tool args.
+        self.broadcast_session_surface(
+            "agent:monitor_progress",
+            serde_json::json!({
+                "sessionId": session_id,
+                "turnId": self.config.turn_id.as_deref(),
+                "kind": "response_delta",
+            }),
+        );
+    }
+
     fn is_cancelled(&self) -> bool {
         self.config
             .cancel_flag
@@ -339,6 +393,8 @@ impl UnifiedEventHandler {
             retractable_stream_segments: Mutex::new(std::collections::HashMap::new()),
             plan_draft_streams: Mutex::new(std::collections::HashMap::new()),
             last_context_tokens: std::sync::atomic::AtomicI64::new(0),
+            monitor_progress_since: Instant::now(),
+            monitor_progress_last: AtomicU64::new(0),
             agent_org_lifecycle_correction_emitted: AtomicBool::new(false),
             assistant_persistence_error: Mutex::new(None),
         }
@@ -984,6 +1040,8 @@ impl TurnEventHandler for UnifiedEventHandler {
         session_id: &str,
         messages: &[Value],
     ) -> Result<(), String> {
+        // Each provider request starts a new output interval (tool loops/retries).
+        self.monitor_progress_last.store(0, Ordering::Relaxed);
         // This marks entry into the provider-request boundary. It does not
         // serialize messages, prompts or credentials and cannot certify liveness.
         if !self.is_cancelled() && self.is_current_turn_generation() {
@@ -1021,6 +1079,10 @@ impl TurnEventHandler for UnifiedEventHandler {
             return;
         }
 
+        if !content.is_empty() {
+            self.broadcast_monitor_progress(session_id);
+        }
+
         if !self.config.group_projection_only {
             self.broadcast_session_surface(
                 "agent:message_delta",
@@ -1038,6 +1100,10 @@ impl TurnEventHandler for UnifiedEventHandler {
     fn on_thinking_delta(&self, session_id: &str, thinking: &str) {
         if self.is_cancelled() {
             return;
+        }
+
+        if !thinking.is_empty() {
+            self.broadcast_monitor_progress(session_id);
         }
 
         if !self.config.group_projection_only {
@@ -1075,6 +1141,11 @@ impl TurnEventHandler for UnifiedEventHandler {
         // its own `streaming_complete` segment, so an
         // `[Text_A, Tool, Text_B]` response renders as three distinct
         // events instead of a single `Text_A+Text_B` glued blob.
+        if tool_call_id.is_some() || tool_name.is_some()
+            || arguments_delta.is_some_and(|delta| !delta.is_empty())
+        {
+            self.broadcast_monitor_progress(session_id);
+        }
         let is_block_start = tool_call_id.is_some() || tool_name.is_some();
         if is_block_start {
             self.flush_streaming(session_id);

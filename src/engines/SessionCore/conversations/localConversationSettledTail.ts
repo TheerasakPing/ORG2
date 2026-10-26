@@ -234,11 +234,9 @@ export async function loadSettledTail(
     false
   );
   if (agentTail) return { agentTail, events };
-  if (terminalStatus === "failed") {
-    // A CLI can exit before recording the prompt (for example, a rejected
-    // resume ID). Its durable terminal is authoritative, but a cached replay
-    // alone is not proof that it wrote nothing. Force the existing mismatch
-    // recovery once before accepting an unchanged portable history.
+  if (preserveInterruptedSuffix) {
+    // A cancelled/failed runner can close before recording its prompt. Force
+    // authoritative recovery before deciding whether the native tail exists.
     events = await recoverNativeTranscriptAfterMismatch(
       sessionId,
       events,
@@ -263,6 +261,7 @@ export async function loadSettledTail(
     const beforeItems = projectNativeConversationItems(before);
     const afterItems = projectNativeConversationItems(events);
     if (
+      terminalStatus === "failed" &&
       beforeItems.length === afterItems.length &&
       nativeConversationItemsArePrefix(beforeItems, afterItems)
     ) {
@@ -284,12 +283,14 @@ export async function loadSettledTail(
       );
       return { agentTail: [], events };
     }
-    // `resolveSettledTail` returns [] (which is truthy) when the provider
-    // transcript contains the accepted user anchor but no assistant/tool
-    // output. `null` is materially different: the accepted turn has not yet
-    // converged into the native transcript/EventStore projection. Keep the
-    // durable queue item recovery-pending rather than publishing a false
-    // empty-tail success and losing the user's interrupted turn on rollover.
+    // A durable cancellation plus exhausted native recovery cannot acquire a
+    // missing prompt later. Retire its execution owner through the existing
+    // visible failure boundary, preserving the accepted user row for Retry.
+    if (terminalStatus === "cancelled") {
+      throw new QueuedConversationRecoveryBlockedError(
+        `conversation turn ${turnIntentId} is missing its interrupted native transcript anchor after recovery`
+      );
+    }
     throw new QueuedConversationRecoveryPendingError(
       `conversation turn ${turnIntentId} is missing its interrupted native transcript anchor`
     );

@@ -155,6 +155,113 @@ Synthetic fixture counts of 1/5/20/50 are only **in-memory projection
 tests**, not real concurrent Rust/Provider work; native multi-session stress
 and safe cancellation/fault injection remain required.
 
+## V4 — passive phase-silence advisories (stacked PR)
+
+While the panel is **open**, each observed native turn receives a local,
+ephemeral timestamp. Silence of >=5 minutes is labelled **quiet**; >=60
+minutes is **old observation**. Neither indicator is a heartbeat or
+proof of a hung worker. A healthy long-running inference/tool and a
+blocked worker can both be silent. Sessions not observed by this monitor
+are **unknown**, never treated as healthy or failed.
+
+The quiet summary intentionally scopes to the displayed maximum 50
+loaded, working, native-phase rows, not the entire installed database
+or cloud history. No background intervals, logs, restarts, cancel
+requests, database edits or network calls are introduced. The same
+30-second in-panel display timer updates these cautions; closing the
+panel discards every observation and notification.
+
+V3 remains diagnostics-only: backend watchdogs, monotonic heartbeat
+semantics and timeout classification require separate Rust work and
+fault-injection tests on actual providers/tools.
+
+## V5 — Scheduler worker polling heartbeat (stacked PR)
+
+The Rust per-session `DialogScheduler` now sends a **content-free**
+`agent:scheduler_heartbeat` signal from *inside the same Tokio worker task*
+that polls the active Turn future, every **15 seconds** while that Turn is
+running. The first tick is eligible immediately after the callback future
+begins being awaited. Maintenance jobs do not emit this signal.
+
+Payload fields are limited to `sessionId`, `turnIntentId`, a monotonically
+increasing **per-claimed-turn epoch**, a monotonically increasing tick
+`sequence`, and `state: alive | finished`. No prompt, tool argument,
+provider endpoint, command output, or credentials are attached.
+
+The panel listens only while open and stores up to **128** records. The
+`finished` state is retained as a short-lived **epoch tombstone** to reject
+late heartbeats from a completed Turn, rather than falsely showing a worker
+alive. Out-of-order epochs and duplicate tick sequences cannot refresh the
+observed-time clock. Closing the panel discards all observations.
+
+For native sessions currently marked working, the panel shows:
+- **Recent:** worker tick seen within 45 seconds.
+- **Late:** no new worker tick for at least 45 seconds.
+- **Missing:** no new worker tick for at least 2 minutes.
+- **Unobserved:** panel did not see a heartbeat, the Turn finished, or
+  timing is invalid. **Not evidence of failure.**
+
+The 30-second UI display timer already used by the open Monitor updates
+these age categories; no additional polling/IPC requests are introduced.
+The Rust heartbeat's timer runs only **while a Turn future is pending**,
+and is dropped when the Turn ends or its owning Worker task is aborted.
+It never touches the durable queue, session store, provider, or tools.
+
+**Crucial semantics:** This detects whether the **Tokio Scheduler task
+continued getting polled**, NOT whether the LLM made progress or a tool
+finished. Healthy long model calls and blocked provider futures can still
+produce on-time scheduler ticks. A suspended laptop, overloaded event loop,
+window hidden, or IPC delivery loss can delay observed ticks. No automatic
+kill/retry/replay/restart action is permitted from these indicators.
+
+The existing dead-Worker replacement on **next enqueue** remains as-is.
+This PR does not add proactive worker recovery and does not certify
+a recovered native turn across app restart.
+
+## V6 — Worker Overview from the live native runtime (stacked PR)
+
+**Worker Overview** is shown at the top of the open Monitor panel. A new
+read-only Tauri RPC command `agent_scheduler_worker_overview` reads the
+in-memory `AgentAppState.sessions` registry and queries the existing
+`DialogScheduler.worker_snapshot()` for each registered native session.
+
+| Counter | Exact meaning |
+| --- | --- |
+| Registered sessions | AgentSession objects **currently retained in RAM**; not lifetime session history. |
+| Workers created | Scheduler workers that were lazily spawned at least once and still retain a handle, including terminated handles. |
+| Live workers | Spawned handles whose Tokio task is unfinished and channel receiver open. |
+| Running jobs | Live workers executing a Turn **or** maintenance job. |
+| Active Turns | Subset of running jobs processing a user-facing Turn. |
+| Maintenance | Subset of running jobs processing internal maintenance. |
+| Idle workers | Spawned, live workers not executing a job. |
+| Queued jobs | Approximate pending message count, excluding the running job. |
+| Dead / closed | Retained Worker handles whose Tokio task has finished or channel closed. |
+| Not started | Registered sessions that never spawned a Worker. |
+
+The command **does not create a Worker**, read SQLite/Cloud history or
+include any Session ID, tenant identifier, workspace path, prompt, tool
+argument or credential. The only response consists of ten numeric counts.
+A short in-memory registry lock clones the handles and is **released before
+awaiting** scheduler snapshots, avoiding a global lock convoy. Snapshot
+values can change during aggregation, so counters are best effort, not
+an atomic epoch-coherent system state.
+
+On opening the panel the frontend requests **one aggregate snapshot**,
+refreshes while visible **at most once per 60 seconds**, and also offers
+manual Refresh. Overlapping requests are joined and stale responses
+cannot update an unmounted panel. If IPC fails it displays the previous
+snapshot and a warning; if no snapshot exists, the UI displays a dash,
+not a falsely reassuring zero. The panel doesn't invoke per-session
+history endpoints or start a new job.
+
+**Scope:** counts only in-process, native Rust `DialogScheduler` tasks.
+External CLI subprocesses, sidecar agents, Cloud workers, background
+subagents and OS threads are **not** included. A dead/closed handle is
+a fact about the in-memory Worker handle, but doesn't automatically
+prove whether its last Turn persisted correctly. Recovery remains
+non-destructive and manual, with no replay or reset action attached.
+
+
 **Next phases** (not included in v1):
 1. Rust-native **session-scoped** scheduler/watchdog heartbeat distinct from response progress, with a
    monotonic per-turn generation and a bounded event schema that never

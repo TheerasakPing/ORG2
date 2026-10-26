@@ -81,6 +81,7 @@ dependencies = [
  "dirs",
  "dispatch2",
  "foreign-types",
+ "fs2",
  "futures",
  "futures-util",
  "git",

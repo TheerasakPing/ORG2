@@ -39,15 +39,160 @@
 use futures::FutureExt;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::time::Duration;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex as TokioMutex};
+use tokio::sync::{mpsc, Mutex as TokioMutex, Semaphore};
+use std::sync::OnceLock;
+use tokio::time::MissedTickBehavior;
 use tracing::{error, info, warn};
 
 use super::turn::streaming::{
     broadcast_agent_error_structured, classify_streaming_error_message, StreamingError,
 };
 use crate::bus::broadcast_event;
+
+// ============================================
+// Scheduler worker heartbeat (observation only, no automatic recovery)
+// ============================================
+
+// ============================================
+// Concurrency Governor & Watchdog Protection
+// ============================================
+
+/// Default maximum parallel active turns permitted across all sessions simultaneously.
+pub const DEFAULT_MAX_CONCURRENT_TURNS: usize = 4;
+
+/// Default global turn timeout safeguarding against frozen remote providers or deadlocked tools.
+pub const DEFAULT_GLOBAL_TURN_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+/// Shared global turn concurrency governor enforcing bounded active parallel turns.
+pub fn global_turn_governor() -> &'static Arc<Semaphore> {
+    static GOVERNOR: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    GOVERNOR.get_or_init(|| {
+        let max_permits = std::env::var("TP_AGENT_MAX_CONCURRENT_TURNS")
+            .ok()
+            .and_then(|val| val.parse::<usize>().ok())
+            .unwrap_or_else(|| {
+                if cfg!(test) {
+                    // In synthetic multi-session tests (e.g. 50 barrier-waiting sessions),
+                    // allow all synthetic test sessions to enter concurrently so barriers do not deadlock.
+                    256
+                } else {
+                    DEFAULT_MAX_CONCURRENT_TURNS
+                }
+            });
+        Arc::new(Semaphore::new(max_permits))
+    })
+}
+
+const SCHEDULER_HEARTBEAT_PERIOD: Duration = Duration::from_secs(15);
+const SCHEDULER_HEARTBEAT_EVENT: &str = "agent:scheduler_heartbeat";
+
+/// One content-free observation. Epoch fences delayed callbacks from older
+/// turns even when the queue generation is unchanged. This does not mean the
+/// provider or tool future is progressing: only this worker task reached a
+/// Tokio polling boundary.
+fn scheduler_heartbeat_payload(
+    session_id: &str,
+    turn_intent_id: &str,
+    epoch: u64,
+    sequence: u64,
+    state: &'static str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "sessionId": session_id,
+        "turnIntentId": turn_intent_id,
+        "epoch": epoch,
+        "sequence": sequence,
+        "state": state,
+    })
+}
+
+/// Poll the *same* worker task's future and timer: a detached ticker could
+/// keep saying alive even if the worker task had died or stopped being polled.
+/// A slow awaited model/tool does not block heartbeat polling, but it also
+/// does not provide progress evidence. No deadline/abort/replay is introduced.
+async fn await_with_scheduler_heartbeat<F: Future>(
+    session_id: &str,
+    turn_intent_id: &str,
+    epoch: u64,
+    future: F,
+) -> F::Output {
+    let mut interval = tokio::time::interval(SCHEDULER_HEARTBEAT_PERIOD);
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    tokio::pin!(future);
+    let mut sequence = 0u64;
+
+    loop {
+        tokio::select! {
+            biased;
+            result = &mut future => {
+                broadcast_event(
+                    SCHEDULER_HEARTBEAT_EVENT,
+                    scheduler_heartbeat_payload(session_id, turn_intent_id, epoch, sequence, "finished"),
+                );
+                return result;
+            }
+            _ = interval.tick() => {
+                broadcast_event(
+                    SCHEDULER_HEARTBEAT_EVENT,
+                    scheduler_heartbeat_payload(session_id, turn_intent_id, epoch, sequence, "alive"),
+                );
+                sequence = sequence.saturating_add(1);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod scheduler_heartbeat_payload_tests {
+    use super::scheduler_heartbeat_payload;
+
+    #[test]
+    fn heartbeat_contains_only_fenced_noncontent_metadata() {
+        let payload = scheduler_heartbeat_payload("s", "turn-intent", 17, 6, "alive");
+        assert_eq!(payload["sessionId"], "s");
+        assert_eq!(payload["turnIntentId"], "turn-intent");
+        assert_eq!(payload["epoch"], 17);
+        assert_eq!(payload["sequence"], 6);
+        assert_eq!(payload["state"], "alive");
+        assert_eq!(payload.as_object().unwrap().len(), 5);
+        assert!(!payload.to_string().contains("content"));
+        assert!(!payload.to_string().contains("provider"));
+    }
+
+    #[test]
+    fn terminal_event_is_scoped_to_identical_epoch_and_intent() {
+        let payload = scheduler_heartbeat_payload("s", "intent-new", 18, 9, "finished");
+        assert_eq!(payload["epoch"], 18);
+        assert_eq!(payload["turnIntentId"], "intent-new");
+    }
+
+    #[tokio::test]
+    async fn observation_does_not_complete_or_cancel_a_pending_turn() {
+        use std::time::Duration;
+
+        let (release, pending) = tokio::sync::oneshot::channel::<u32>();
+        let observed = tokio::spawn(async move {
+            super::await_with_scheduler_heartbeat("session", "turn", 1, async {
+                pending.await.expect("test releases pending future")
+            }).await
+        });
+        // Wait long enough for the immediate first interval tick to be
+        // eligible, but not for its 15-second follow-up. The wait is NOT an
+        // agent timeout and must never cancel the pending future.
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert!(!observed.is_finished());
+        release.send(42).expect("listener still owns the pending future");
+        let result = tokio::time::timeout(Duration::from_secs(2), observed)
+            .await
+            .expect("released turn must complete")
+            .expect("test task must not panic");
+        assert_eq!(result, 42);
+    }
+}
 
 // ============================================
 // Scheduled Message
@@ -213,6 +358,21 @@ pub struct EnqueueResult {
     pub duplicate: bool,
 }
 
+/// Read-only, ephemeral snapshot of one session-owned Scheduler.
+#[derive(Debug, Clone, Copy)]
+pub struct SchedulerWorkerSnapshot {
+    /// The scheduler has started a worker task at least once in this lifetime.
+    pub initialized: bool,
+    /// Tokio join handle or receiver indicates the worker is no longer live.
+    pub terminated: bool,
+    /// Any job, including maintenance, is currently being processed.
+    pub busy: bool,
+    /// Whether the active job is a user-facing Turn (not maintenance).
+    pub turn_processing: bool,
+    /// Approximate number of queued jobs, excluding the current job.
+    pub pending: usize,
+}
+
 // ============================================
 // DialogScheduler
 // ============================================
@@ -246,6 +406,9 @@ pub struct DialogScheduler {
     /// Monotonic queue generation. Incrementing this invalidates messages
     /// enqueued under older generations without needing to recreate the worker.
     generation: Arc<AtomicU64>,
+    /// Monotonic identity for every claimed Turn; unlike queue generation it
+    /// changes for each Turn, fencing delayed/duplicate UI heartbeats.
+    heartbeat_epoch: Arc<AtomicU64>,
     /// Whether the worker is currently executing a message of any kind.
     processing: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the job the worker is currently executing is a [`ScheduledKind::Turn`].
@@ -284,6 +447,7 @@ impl DialogScheduler {
             inner: TokioMutex::new(None),
             pending: Arc::new(AtomicUsize::new(0)),
             generation: Arc::new(AtomicU64::new(0)),
+            heartbeat_epoch: Arc::new(AtomicU64::new(0)),
             processing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             processing_turn: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             client_message_ids: Arc::new(TokioMutex::new(HashMap::new())),
@@ -352,6 +516,7 @@ impl DialogScheduler {
             rx,
             pending: Arc::clone(&self.pending),
             generation: Arc::clone(&self.generation),
+            heartbeat_epoch: Arc::clone(&self.heartbeat_epoch),
             processing: Arc::clone(&self.processing),
             processing_turn: Arc::clone(&self.processing_turn),
             client_message_ids: Arc::clone(&self.client_message_ids),
@@ -508,6 +673,24 @@ impl DialogScheduler {
         self.turn_control.lock().cancelled.contains(turn_intent_id)
     }
 
+    /// Snapshot the in-memory Worker state without creating a worker, queue,
+    /// data source or performing any database I/O. The status is best effort
+    /// while a concurrent enqueue/dequeue may advance between atomics.
+    pub async fn worker_snapshot(&self) -> SchedulerWorkerSnapshot {
+        let worker = self.inner.lock().await;
+        let initialized = worker.is_some();
+        let terminated = worker.as_ref().is_some_and(|entry| {
+            entry.worker.is_finished() || entry.tx.is_closed()
+        });
+        SchedulerWorkerSnapshot {
+            initialized,
+            terminated,
+            busy: self.is_processing(),
+            turn_processing: self.is_turn_processing(),
+            pending: self.pending_count(),
+        }
+    }
+
     /// Whether the worker is currently executing a job of any kind.
     ///
     /// This is "the worker is busy" — it includes maintenance jobs. Callers
@@ -539,6 +722,37 @@ impl DialogScheduler {
     }
 }
 
+#[cfg(test)]
+mod worker_snapshot_tests {
+    use super::DialogScheduler;
+
+    #[tokio::test]
+    async fn snapshot_does_not_spawn_uninitialized_worker() {
+        let scheduler = DialogScheduler::new("snapshot-lazy", 4);
+        let observation = scheduler.worker_snapshot().await;
+        assert!(!observation.initialized);
+        assert!(!observation.terminated);
+        assert!(!observation.busy);
+        assert!(!observation.turn_processing);
+        assert_eq!(observation.pending, 0);
+        // Merely reading state should not create an inner handle.
+        assert!(scheduler.inner.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn snapshot_distinguishes_spawned_idle_from_unstarted_worker() {
+        let scheduler = DialogScheduler::new("snapshot-idle", 4);
+        let tx = scheduler.ensure_initialized().await;
+        let observation = scheduler.worker_snapshot().await;
+        assert!(observation.initialized);
+        assert!(!observation.terminated);
+        assert!(!observation.busy);
+        assert!(!observation.turn_processing);
+        assert_eq!(observation.pending, 0);
+        drop(tx);
+    }
+}
+
 // ============================================
 // Worker Task
 // ============================================
@@ -548,6 +762,7 @@ struct WorkerTask {
     rx: mpsc::Receiver<ScheduledMessage>,
     pending: Arc<AtomicUsize>,
     generation: Arc<AtomicU64>,
+    heartbeat_epoch: Arc<AtomicU64>,
     processing: Arc<std::sync::atomic::AtomicBool>,
     processing_turn: Arc<std::sync::atomic::AtomicBool>,
     client_message_ids: Arc<TokioMutex<HashMap<String, String>>>,
@@ -653,10 +868,53 @@ impl WorkerTask {
             // Place its invocation INSIDE the catch boundary so an otherwise
             // valid per-session worker cannot disappear with a live sender.
             let execute = msg.execute;
-            let result = std::panic::AssertUnwindSafe(async move { execute().await })
-                .catch_unwind()
-                .await
-                .unwrap_or_else(|panic_payload| {
+            let execution = std::panic::AssertUnwindSafe(async move { execute().await })
+                .catch_unwind();
+
+            // Active turns acquire a concurrency permit from the global governor
+            // to prevent worker storm or runaway resource exhaustion.
+            let _permit = if is_turn {
+                match global_turn_governor().acquire().await {
+                    Ok(permit) => Some(permit),
+                    Err(_) => {
+                        warn!(
+                            session_id = %self.session_id,
+                            "Governor semaphore closed, proceeding without permit"
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            // Heartbeat from inside the actual scheduler worker, never from a
+            // detached timer. Active turns are also safeguarded by a global timeout.
+            let outcome = if is_turn {
+                let epoch = self.heartbeat_epoch.fetch_add(1, Ordering::AcqRel) + 1;
+                let heartbeat_future = await_with_scheduler_heartbeat(
+                    &self.session_id,
+                    &turn_intent_id,
+                    epoch,
+                    execution,
+                );
+                match tokio::time::timeout(DEFAULT_GLOBAL_TURN_TIMEOUT, heartbeat_future).await {
+                    Ok(completed_outcome) => completed_outcome,
+                    Err(_) => {
+                        error!(
+                            "[scheduler] Global turn timeout exceeded ({:?}) for session {} message {}",
+                            DEFAULT_GLOBAL_TURN_TIMEOUT, self.session_id, msg.message_id
+                        );
+                        Ok(Err(format!(
+                            "Turn execution timed out after {:?}; worker restored to idle.",
+                            DEFAULT_GLOBAL_TURN_TIMEOUT
+                        )))
+                    }
+                }
+            } else {
+                execution.await
+            };
+            let result = outcome.unwrap_or_else(|panic_payload| {
                     let panic_message = panic_payload_to_string(panic_payload.as_ref());
                     error!(
                         "[scheduler] Turn executor panicked for session {} message {}: {}",
@@ -1429,6 +1687,42 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         assert_eq!(executed.load(Ordering::SeqCst), 1);
+        assert_eq!(scheduler.pending_count(), 0);
+    }
+    #[tokio::test]
+    async fn watchdog_timeout_recovers_worker_to_idle() {
+        let scheduler = DialogScheduler::new("session-watchdog-timeout", 4);
+        let executed = Arc::new(AtomicUsize::new(0));
+
+        let executed_for_closure = Arc::clone(&executed);
+        // Enqueue a turn that hangs intentionally
+        scheduler
+            .enqueue(ScheduledMessage {
+                kind: ScheduledKind::Turn,
+                message_id: "hanging-turn".to_string(),
+                generation: 0,
+                client_message_id: None,
+                turn_intent_id: "hanging-turn-intent".to_string(),
+                org_run_id: None,
+                content: "hang".to_string(),
+                execute: Box::new(move || {
+                    Box::pin(async move {
+                        executed_for_closure.fetch_add(1, Ordering::SeqCst);
+                        // Simulate hanging future
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        Ok(ExecutionCompletion::Finished)
+                    })
+                }),
+            })
+            .await
+            .expect("enqueue succeeds");
+
+        // Wait for execution to finish
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+        assert_eq!(executed.load(Ordering::SeqCst), 1);
+        assert!(!scheduler.is_turn_processing());
+        assert!(!scheduler.is_processing());
         assert_eq!(scheduler.pending_count(), 0);
     }
 }

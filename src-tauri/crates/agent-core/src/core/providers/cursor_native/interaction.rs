@@ -36,29 +36,25 @@ pub(super) fn handle_interaction_update(
 ) -> Option<ToolCallRequest> {
     let inner = update.message?;
     match inner {
-        pb::interaction_update::Message::TextDelta(d) => {
-            if !d.text.is_empty() {
-                content.push_str(&d.text);
-                on_delta(StreamDelta {
-                    content: Some(d.text),
-                    reasoning: None,
-                    tool_call_delta: None,
-                    finish_reason: None,
-                    usage: None,
-                });
-            }
+        pb::interaction_update::Message::TextDelta(d) if !d.text.is_empty() => {
+            content.push_str(&d.text);
+            on_delta(StreamDelta {
+                content: Some(d.text),
+                reasoning: None,
+                tool_call_delta: None,
+                finish_reason: None,
+                usage: None,
+            });
         }
-        pb::interaction_update::Message::ThinkingDelta(d) => {
-            if !d.text.is_empty() {
-                reasoning.push_str(&d.text);
-                on_delta(StreamDelta {
-                    content: None,
-                    reasoning: Some(d.text),
-                    tool_call_delta: None,
-                    finish_reason: None,
-                    usage: None,
-                });
-            }
+        pb::interaction_update::Message::ThinkingDelta(d) if !d.text.is_empty() => {
+            reasoning.push_str(&d.text);
+            on_delta(StreamDelta {
+                content: None,
+                reasoning: Some(d.text),
+                tool_call_delta: None,
+                finish_reason: None,
+                usage: None,
+            });
         }
         pb::interaction_update::Message::TokenDelta(d) => {
             *output_tokens = output_tokens.saturating_add(d.tokens as i64);

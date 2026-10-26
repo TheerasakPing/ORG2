@@ -70,28 +70,24 @@ export function shouldCollapseChatPanelTabRow({
   );
 }
 
-/**
- * Controls the folded header must never drag the window out from under.
- */
+/** Controls that must not trigger header double-click maximize. */
 const HEADER_INTERACTIVE_SELECTOR =
   'button,a,input,select,textarea,[role="button"],[role="menuitem"],[role="tab"],[contenteditable="true"]';
 
 /**
- * Whether a mousedown on the folded header should start a window drag.
- *
- * Tauri matches `data-tauri-drag-region` on the event target alone and never
- * walks ancestors, so only the exact element under the cursor counts. In this
- * row that element is never the one carrying the attribute: the content slot
- * stretches over the whole row, and the session breadcrumb inside it is a
- * `container-type: inline-size` element, which cannot be shrunk to its content
- * to free the space up — containment makes it contribute zero width, so it
- * collapses and takes the title with it. The folded row therefore drives the
- * drag itself and steps aside only for things the user can actually click.
+ * Whether a header double-click should maximize the window.
  */
 export function shouldStartHeaderDragFromTarget(
   target: Element | null
 ): boolean {
-  return Boolean(target) && !target?.closest(HEADER_INTERACTIVE_SELECTOR);
+  return (
+    Boolean(target) &&
+    // Tauri handles direct drag-region double-clicks on mouseup.
+    !target?.hasAttribute("data-tauri-drag-region") &&
+    !target?.closest(HEADER_INTERACTIVE_SELECTOR) &&
+    !target?.closest('[data-tauri-drag-region="false"]') &&
+    !target?.closest('[style*="no-drag"]')
+  );
 }
 
 /** Floating-chrome height the transcript scrolls beneath. */

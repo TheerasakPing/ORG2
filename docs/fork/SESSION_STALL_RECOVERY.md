@@ -21,6 +21,8 @@
 
 ## Safe checks for an existing installed app
 
+For aggregate read-only SQLite triage without printing session identifiers or prompts, use the [offline session doctor](SESSION_DIAGNOSTICS.md). Its stale-running estimate is a heuristic, not a runtime liveness proof.
+
 **Do not delete `sessions.db`, its `-wal`/`-shm` companions, provider credentials, or entire app profiles to clear a stall.** The installed upstream ORG2 binary does not contain this fork patch.
 
 1. Quit the affected app normally. Preserve a copy of its profile folder, ideally after all related processes have exited, before any repair. For upstream this is generally `~/.orgii/`; for the fork's production build the intended default is `~/.tp-agent-studio/`.

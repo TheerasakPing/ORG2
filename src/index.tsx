@@ -37,6 +37,7 @@ const disposeTransientScrollbars = installTransientScrollbars();
 module.hot?.dispose(disposeTransientScrollbars);
 
 const log = createLogger("Init");
+let disposeWindowDragFallback: () => void = () => undefined;
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -150,6 +151,7 @@ if (isDev && module.hot) {
       invokeTauri("close_all_inline_webviews").catch(() => {});
     }
   });
+  module.hot.dispose(() => disposeWindowDragFallback());
 }
 
 // ============================================================================
@@ -270,9 +272,15 @@ async function initializeApp() {
   // mount. i18nReady already started at module load and runs in parallel with
   // the other ops; this await only blocks when cold start is slow enough that
   // locale bundles are still loading.
+  const tauriRuntimePromise = initializeTauriAPIs().then(async () => {
+    applyWindowsNativeChromeAttribute();
+    const { installWindowDragFallback } =
+      await import("@src/util/platform/windowDrag");
+    disposeWindowDragFallback = installWindowDragFallback(document);
+  });
   const initPromise = Promise.all([
     initTheme(),
-    initializeTauriAPIs().then(() => applyWindowsNativeChromeAttribute()),
+    tauriRuntimePromise,
     codeEditorWebSocketPromise,
     appModulePromise,
   ]);

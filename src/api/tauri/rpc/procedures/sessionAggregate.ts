@@ -2,6 +2,9 @@ import { defineProcedure } from "../invoke";
 import * as schemas from "../schemas";
 
 export const sessionAggregate = {
+  workerOverview: defineProcedure("agent_scheduler_worker_overview")
+    .output(schemas.sessionAggregate.NativeWorkerOverviewSchema)
+    .build(),
   sections: defineProcedure("sidebar_sections_list")
     .output(schemas.sessionAggregate.SidebarSectionsSchema)
     .build(),

@@ -273,7 +273,7 @@ async function initializeApp() {
   // the other ops; this await only blocks when cold start is slow enough that
   // locale bundles are still loading.
   const tauriRuntimePromise = initializeTauriAPIs().then(async () => {
-    applyWindowsNativeChromeAttribute();
+    await applyWindowsNativeChromeAttribute();
     const { installWindowDragFallback } =
       await import("@src/util/platform/windowDrag");
     disposeWindowDragFallback = installWindowDragFallback(document);

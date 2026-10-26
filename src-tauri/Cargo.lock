@@ -1581,6 +1581,7 @@ dependencies = [
  "dirs",
  "parking_lot",
  "rusqlite",
+ "tempfile",
  "tracing",
 ]
 

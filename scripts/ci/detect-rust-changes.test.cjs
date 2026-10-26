@@ -82,8 +82,24 @@ test("Rust and mixed changes run Rust", () => {
 test("build machinery the Rust job invokes stays in Rust scope", () => {
   assert.equal(requiresRust([".github/workflows/ci.yml"]), true);
   assert.equal(requiresRust([".github/workflows/warm-rust-cache.yml"]), true);
+  assert.equal(requiresRust([".github/workflows/nightly-full-checks.yml"]), true);
+  assert.equal(requiresRust([".github/workflows/release.yaml"]), true);
   assert.equal(requiresRust([".github/actions/setup/action.yml"]), true);
   assert.equal(requiresRust(["scripts/tauri/prepare-sidecars.cjs"]), true);
+});
+
+test("unrelated GitHub workflow edits cannot force a full Rust compile", () => {
+  const independentWorkflows = [
+    ".github/workflows/session-diagnostics.yml",
+    ".github/workflows/fork-safety.yml",
+    ".github/workflows/codeql.yml",
+    ".github/workflows/pr-policy.yml",
+    ".github/workflows/warm-frontend-cache.yml",
+  ];
+  for (const name of independentWorkflows) {
+    assert.equal(requiresRust([name]), false, name);
+  }
+  assert.equal(requiresRust([...independentWorkflows, "src-tauri/src/lib.rs"]), true);
 });
 
 test("the gate cannot scope a diff that edits the gate itself", () => {

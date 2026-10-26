@@ -34,6 +34,8 @@
 - [x] Catch scheduler execute-factory panics, track dead worker handles, recover the queue on next enqueue, and persist failed session state; added targeted regression tests (final CI pending).
 - [x] Continue independent startup reconciliation phases after a partial failure so stale in-flight session cleanup is still attempted; see [multi-session recovery audit](SESSION_STALL_RECOVERY.md).
 - [ ] Implement bounded progress/heartbeat diagnostics for genuinely hung provider or Tool futures, with cancellation semantics that never replay side-effectful work.
+- [x] Add bounded, synthetic Rust `DialogScheduler` stress tests for 1/5/20/50 concurrent sessions, targeted cancellation, dead-worker no-replay isolation and queue capacity (CI confirmed: macOS Rust workspace tests, macOS/Windows Clippy and CodeQL passed on PR #20; real provider/tool load still unverified). See [Multi-Session Stress Lab](MULTI_SESSION_STRESS_LAB.md).
+- [x] Add isolated synthetic Provider/Tool timeout/error/never-returning future and 5/20/50 concurrent WAL writer/reader tests (test code added; CI verification pending). See [Fault Injection Lab](PROVIDER_TOOL_SQLITE_FAULT_LAB.md).
 - [ ] Stress-test 1/5/20/50 concurrent sessions under load and validate clean shutdown/restart on all three platforms.
 
 **Acceptance:** no double-owned memory consolidation; session/tool cancellation leaves no orphaned jobs; migration failures cannot leave an app silently running on a partially upgraded schema.
@@ -46,6 +48,7 @@
 - [x] Emit content-free native Rust provider-request/tool-execute-start/tool-result transition events and project them into the opened Monitor (stacked PR, acceptance CI pending). These are not periodic heartbeats or proof of provider liveness.
 - [x] Add passive quiet-phase advisories after 5/60 minutes for observed native turns (stacked PR, CI pending). No automatic recovery or hang certainty.
 - [x] Add 15-second scheduler-owned heartbeat signals scoped by Turn epoch and bounded frontend monitor warnings at 45/120 seconds (stacked PR, CI pending). This proves only Tokio task polling, not provider/tool progress or safe automatic recovery.
+- [x] Emit rate-limited, content-free actual provider-delta progress pulses and read-only no-output advisories (PR awaiting native validation). Scheduler heartbeat observations are not proof of provider output, automatic recovery or real concurrency certification.
 - [x] Add in-app Worker Overview sourced from the actual in-memory Rust AgentAppState/DialogScheduler worker handles (stacked PR, CI pending): created, live, busy, idle, dead, queue, maintenance and not-started counts. Excludes CLI/Cloud workers and does not auto-recover.
 - [ ] Build a unified runtime dashboard: tokens, costs, tool latency, retry reason, memory queue, session CPU/RAM, pending approvals.
 - [ ] Add permissions preview and audit receipts for CLI, MCP, desktop and browser execution.

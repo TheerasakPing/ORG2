@@ -199,6 +199,9 @@ pub fn begin_immediate(conn: &Connection) -> SqliteResult<Transaction<'_>> {
 }
 
 #[cfg(test)]
+mod fault_injection_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

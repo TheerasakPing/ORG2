@@ -1,7 +1,10 @@
 import React, { Suspense, lazy, useCallback, useState } from "react";
 
 const LiveSessionMonitorPanel = lazy(
-  () => import(/* webpackChunkName: "session-health-monitor" */ "./LiveSessionMonitorPanel")
+  () =>
+    import(
+      /* webpackChunkName: "session-health-monitor" */ "./LiveSessionMonitorPanel"
+    )
 );
 
 /** No Jotai subscriptions, listeners or timers until the user opens Monitor. */
@@ -10,7 +13,7 @@ export function LiveSessionMonitorLauncher(): React.ReactElement {
   const close = useCallback(() => setOpen(false), []);
 
   return (
-    <div className="pointer-events-none fixed bottom-3 right-3 z-[85]">
+    <div className="pointer-events-none fixed right-3 bottom-3 z-[85]">
       <button
         type="button"
         data-testid="live-session-monitor-trigger"
@@ -24,7 +27,16 @@ export function LiveSessionMonitorLauncher(): React.ReactElement {
       </button>
       {open && (
         <div className="pointer-events-auto">
-          <Suspense fallback={<div role="status" className="absolute bottom-12 right-0 rounded-xl bg-bg-2 p-4 text-xs">Loading monitor…</div>}>
+          <Suspense
+            fallback={
+              <div
+                role="status"
+                className="absolute right-0 bottom-12 rounded-xl bg-bg-2 p-4 text-xs"
+              >
+                Loading monitor…
+              </div>
+            }
+          >
             <LiveSessionMonitorPanel onClose={close} />
           </Suspense>
         </div>

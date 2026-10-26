@@ -3,13 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { AgentLiveStatus } from "@src/api/tauri/rpc/schemas/agentOrgs";
 import type { Session } from "@src/store/session/sessionAtom/types";
 
-import { ingestNativePhase } from "./nativePhaseEvents";
-
 import {
-  deriveLiveSessionSummary,
   MAX_LIVE_MONITOR_ROWS,
+  deriveLiveSessionSummary,
   monitorPhase,
 } from "./liveSessionMonitorModel";
+import { ingestNativePhase } from "./nativePhaseEvents";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 
@@ -20,16 +19,26 @@ function session(
   other: Partial<Session> = {}
 ): Session {
   return {
-    session_id: id, status, updated_at: updated,
-    created_at: "2026-10-17T11:00:00Z", name: "Session " + id,
+    session_id: id,
+    status,
+    updated_at: updated,
+    created_at: "2026-10-17T11:00:00Z",
+    name: "Session " + id,
     ...other,
   };
 }
 
-function hook(id: string, status: string, extras: Partial<AgentLiveStatus> = {}): AgentLiveStatus {
+function hook(
+  id: string,
+  status: string,
+  extras: Partial<AgentLiveStatus> = {}
+): AgentLiveStatus {
   return {
-    sessionId: id, source: "codex", status,
-    isInterrupt: false, updatedAtMs: NOW,
+    sessionId: id,
+    source: "codex",
+    status,
+    isInterrupt: false,
+    updatedAtMs: NOW,
     ...extras,
   };
 }
@@ -43,10 +52,13 @@ describe("live session monitor presentation model", () => {
       interactivePrompt: "SECRET USER PROMPT",
     });
     const entries = new Map<string, AgentLiveStatus>([
-      ["cli-1", live], ["local-1", live],
+      ["cli-1", live],
+      ["local-1", live],
     ]);
     const summary = deriveLiveSessionSummary(
-      [session("local-1", "running")], entries, { nowMs: NOW }
+      [session("local-1", "running")],
+      entries,
+      { nowMs: NOW }
     );
     expect(summary.totalLoaded).toBe(1);
     expect(summary.attention).toBe(1);
@@ -58,24 +70,33 @@ describe("live session monitor presentation model", () => {
 
   it("exposes safe CLI tool identifier but never tool inputs or prompts", () => {
     const live = hook("cli-1", "running", {
-      toolName: "functions.exec", toolInputPreview: "secret://key",
+      toolName: "functions.exec",
+      toolInputPreview: "secret://key",
       interactivePrompt: "Do not leak",
     });
     const summary = deriveLiveSessionSummary(
-      [session("cli-1", "running")], new Map([["cli-1", live]]), { nowMs: NOW }
+      [session("cli-1", "running")],
+      new Map([["cli-1", live]]),
+      { nowMs: NOW }
     );
     expect(summary.rows[0]?.detail).toBe("CLI tool: functions.exec");
     expect(JSON.stringify(summary)).not.toContain("secret://key");
     expect(JSON.stringify(summary)).not.toContain("Do not leak");
     const unsafe = hook("cli-1", "running", { toolName: "Read TOKEN=secret" });
-    expect(deriveLiveSessionSummary(
-      [session("cli-1", "running")], new Map([["cli-1", unsafe]]), { nowMs: NOW }
-    ).rows[0]?.detail).toContain("unspecified");
+    expect(
+      deriveLiveSessionSummary(
+        [session("cli-1", "running")],
+        new Map([["cli-1", unsafe]]),
+        { nowMs: NOW }
+      ).rows[0]?.detail
+    ).toContain("unspecified");
   });
 
   it("does not claim native provider/tool phase from roster status", () => {
     const summary = deriveLiveSessionSummary(
-      [session("native", "running")], new Map(), { nowMs: NOW }
+      [session("native", "running")],
+      new Map(),
+      { nowMs: NOW }
     );
     expect(summary.busy).toBe(1);
     expect(summary.rows[0]?.detail).toContain("step unknown");
@@ -89,13 +110,21 @@ describe("live session monitor presentation model", () => {
         session("fresh", "running"),
         session("future", "running", "2035-01-01T00:00:00Z"),
         session("invalid", "running", "not-a-date"),
-      ], new Map(), { nowMs: NOW }
+      ],
+      new Map(),
+      { nowMs: NOW }
     );
     expect(summary.olderStatus).toBe(1);
-    expect(summary.rows.find((r) => r.id === "old")?.oldPersistedStatus).toBe(true);
-    expect(summary.rows.find((r) => r.id === "fresh")?.oldPersistedStatus).toBe(false);
+    expect(summary.rows.find((r) => r.id === "old")?.oldPersistedStatus).toBe(
+      true
+    );
+    expect(summary.rows.find((r) => r.id === "fresh")?.oldPersistedStatus).toBe(
+      false
+    );
     expect(summary.rows.find((r) => r.id === "future")?.updatedAtMs).toBeNull();
-    expect(summary.rows.find((r) => r.id === "invalid")?.updatedAtMs).toBeNull();
+    expect(
+      summary.rows.find((r) => r.id === "invalid")?.updatedAtMs
+    ).toBeNull();
     expect(JSON.stringify(summary)).not.toContain("hung");
   });
 
@@ -106,16 +135,22 @@ describe("live session monitor presentation model", () => {
       session("idle", "idle"),
       session("wait", "waiting_for_user"),
     ];
-    const active = deriveLiveSessionSummary(sessions, new Map(), { nowMs: NOW });
+    const active = deriveLiveSessionSummary(sessions, new Map(), {
+      nowMs: NOW,
+    });
     expect(active.rows.map((r) => r.id)).toEqual(["active", "wait"]);
     expect(active.busy).toBe(1);
     expect(active.attention).toBe(1);
     const all = deriveLiveSessionSummary(sessions, new Map(), {
-      activeOnly: false, nowMs: NOW,
+      activeOnly: false,
+      nowMs: NOW,
     });
     expect(all.totalLoaded).toBe(4);
     expect(all.rows.map((r) => r.id)).toEqual([
-      "active", "wait", "idle", "complete",
+      "active",
+      "wait",
+      "idle",
+      "complete",
     ]);
   });
 
@@ -123,14 +158,20 @@ describe("live session monitor presentation model", () => {
     const sessions = [
       session("imported", "running", undefined, {
         importedFrom: {
-          orgId: "org", sourceSessionId: "source", ownerMemberId: "member",
-          epoch: 0, seq: 0, count: 0,
+          orgId: "org",
+          sourceSessionId: "source",
+          ownerMemberId: "member",
+          epoch: 0,
+          seq: 0,
+          count: 0,
         },
       }),
       session("readonly", "running", undefined, { readOnly: true }),
       session("local", "running"),
     ];
-    const summary = deriveLiveSessionSummary(sessions, new Map(), { nowMs: NOW });
+    const summary = deriveLiveSessionSummary(sessions, new Map(), {
+      nowMs: NOW,
+    });
     expect(summary.rows.map((r) => r.id)).toEqual(["local"]);
   });
 
@@ -141,8 +182,12 @@ describe("live session monitor presentation model", () => {
       session("cloud", "running", undefined, {
         readOnly: true,
         importedFrom: {
-          orgId: "org", sourceSessionId: "remote", ownerMemberId: "member",
-          epoch: 0, seq: 0, count: 0,
+          orgId: "org",
+          sourceSessionId: "remote",
+          ownerMemberId: "member",
+          epoch: 0,
+          seq: 0,
+          count: 0,
         },
       }),
     ];
@@ -159,21 +204,27 @@ describe("live session monitor presentation model", () => {
     const sessions = Array.from({ length: 100 }, (_, i) =>
       session("session-" + i, "running")
     );
-    const result = deriveLiveSessionSummary(sessions, new Map(), { nowMs: NOW });
+    const result = deriveLiveSessionSummary(sessions, new Map(), {
+      nowMs: NOW,
+    });
     expect(result.busy).toBe(100);
     expect(result.visibleCount).toBe(MAX_LIVE_MONITOR_ROWS);
     expect(result.totalLoaded).toBe(100);
     expect(result.rows).toHaveLength(50);
     expect(result.truncated).toBe(true);
-    expect(deriveLiveSessionSummary(sessions, new Map(), {
-      nowMs: NOW, maxRows: 5,
-    }).rows).toHaveLength(5);
+    expect(
+      deriveLiveSessionSummary(sessions, new Map(), {
+        nowMs: NOW,
+        maxRows: 5,
+      }).rows
+    ).toHaveLength(5);
   });
 
   it("keeps unknown statuses unknown, never guesses a runtime phase", () => {
     expect(monitorPhase("provider_streaming")).toBe("unknown");
     const s = deriveLiveSessionSummary(
-      [session("unknown", "provider_streaming")], new Map(),
+      [session("unknown", "provider_streaming")],
+      new Map(),
       { nowMs: NOW, activeOnly: false }
     );
     expect(s.rows[0]?.phase).toBe("unknown");
@@ -183,37 +234,59 @@ describe("live session monitor presentation model", () => {
 
   it("never includes raw message content in projection", () => {
     const s = deriveLiveSessionSummary(
-      [session("private-id", "running", undefined, {
-        user_input: "VERY SECRET USER INPUT",
-        error_message: "SECRET provider token",
-      })],
-      new Map(), { nowMs: NOW }
+      [
+        session("private-id", "running", undefined, {
+          user_input: "VERY SECRET USER INPUT",
+          error_message: "SECRET provider token",
+        }),
+      ],
+      new Map(),
+      { nowMs: NOW }
     );
     expect(JSON.stringify(s)).not.toContain("VERY SECRET USER INPUT");
     expect(JSON.stringify(s)).not.toContain("SECRET provider token");
   });
 
   it("shows the actual Rust provider boundary only for an observed native session", () => {
-    const phases = ingestNativePhase(new Map(), {
-      sessionId: "native-1", turnId: "turn-1", phase: "provider_request",
-    }, NOW);
+    const phases = ingestNativePhase(
+      new Map(),
+      {
+        sessionId: "native-1",
+        turnId: "turn-1",
+        phase: "provider_request",
+      },
+      NOW
+    );
     const summary = deriveLiveSessionSummary(
       [session("native-1", "running"), session("native-2", "running")],
       new Map(),
       { nowMs: NOW, nativePhases: phases }
     );
-    expect(summary.rows.find((r) => r.id === "native-1")?.detail).toContain("provider request");
-    expect(summary.rows.find((r) => r.id === "native-1")?.source).toBe("native-phase");
-    expect(summary.rows.find((r) => r.id === "native-2")?.detail).toContain("step unknown");
+    expect(summary.rows.find((r) => r.id === "native-1")?.detail).toContain(
+      "provider request"
+    );
+    expect(summary.rows.find((r) => r.id === "native-1")?.source).toBe(
+      "native-phase"
+    );
+    expect(summary.rows.find((r) => r.id === "native-2")?.detail).toContain(
+      "step unknown"
+    );
   });
 
   it("does not display a native running phase against a terminal session", () => {
-    const phases = ingestNativePhase(new Map(), {
-      sessionId: "native", turnId: "turn-1",
-      phase: "tool_executing", tool: "read_file",
-    }, NOW);
+    const phases = ingestNativePhase(
+      new Map(),
+      {
+        sessionId: "native",
+        turnId: "turn-1",
+        phase: "tool_executing",
+        tool: "read_file",
+      },
+      NOW
+    );
     const summary = deriveLiveSessionSummary(
-      [session("native", "completed")], new Map(),
+      [session("native", "completed")],
+      new Map(),
       { nowMs: NOW, nativePhases: phases, activeOnly: false }
     );
     expect(summary.rows[0]?.source).toBe("session-roster");
@@ -221,20 +294,26 @@ describe("live session monitor presentation model", () => {
   });
 
   it("prioritizes authoritative CLI hook details over unrelated native phase", () => {
-    const phases = ingestNativePhase(new Map(), {
-      sessionId: "cli", turnId: "turn-1", phase: "tool_executing",
-      tool: "Read",
-    }, NOW);
+    const phases = ingestNativePhase(
+      new Map(),
+      {
+        sessionId: "cli",
+        turnId: "turn-1",
+        phase: "tool_executing",
+        tool: "Read",
+      },
+      NOW
+    );
     const h = hook("cli", "waiting_for_user", {
       interactivePrompt: "SECRET PROMPT",
     });
     const summary = deriveLiveSessionSummary(
-      [session("cli", "running")], new Map([["cli", h]]),
+      [session("cli", "running")],
+      new Map([["cli", h]]),
       { nowMs: NOW, nativePhases: phases }
     );
     expect(summary.rows[0]?.source).toBe("cli-hook");
     expect(summary.rows[0]?.detail).toContain("waiting for user");
     expect(JSON.stringify(summary)).not.toContain("SECRET");
   });
-
 });

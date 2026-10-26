@@ -396,22 +396,5 @@ export type SidebarSectionMutation = z.infer<
   typeof SidebarSectionMutationSchema
 >;
 
-
-/** Native Rust scheduler counts from the in-memory AgentAppState registry.
- * This is NOT the number of cloud agents, CLI sidecar processes or OS threads.
- * A persisted Session with no scheduler worker does not count as a Worker.
- */
-export const NativeWorkerOverviewSchema = z.object({
-  registeredSessions: z.number().int().nonnegative(),
-  neverStarted: z.number().int().nonnegative(),
-  initializedWorkers: z.number().int().nonnegative(),
-  liveWorkers: z.number().int().nonnegative(),
-  busyWorkers: z.number().int().nonnegative(),
-  activeTurnWorkers: z.number().int().nonnegative(),
-  maintenanceWorkers: z.number().int().nonnegative(),
-  idleWorkers: z.number().int().nonnegative(),
-  terminatedWorkers: z.number().int().nonnegative(),
-  queuedJobs: z.number().int().nonnegative(),
-}).strict();
-
-export type NativeWorkerOverview = z.infer<typeof NativeWorkerOverviewSchema>;
+export { NativeWorkerOverviewSchema } from "./workerOverview";
+export type { NativeWorkerOverview } from "./workerOverview";

@@ -26,7 +26,8 @@ export function useNativeWorkerOverview(): {
     if (inFlight.current) return inFlight.current;
     const epoch = generation.current;
     setIsLoading(true);
-    const request = rpc.sessionAggregate.workerOverview()
+    const request = rpc.sessionAggregate
+      .workerOverview()
       .then((snapshot) => {
         if (epoch !== generation.current) return;
         setOverview(snapshot);
@@ -46,11 +47,17 @@ export function useNativeWorkerOverview(): {
 
   useEffect(() => {
     generation.current += 1;
-    void refresh();
+    let mounted = true;
+    // Defer the first read until after the effect commit: refresh() updates
+    // loading state and must not do so synchronously inside useEffect.
+    queueMicrotask(() => {
+      if (mounted) refresh().catch(() => {});
+    });
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void refresh();
+      if (document.visibilityState === "visible") refresh().catch(() => {});
     }, REFRESH_MS);
     return () => {
+      mounted = false;
       window.clearInterval(timer);
       generation.current += 1;
       inFlight.current = null;

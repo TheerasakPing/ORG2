@@ -6,29 +6,29 @@ import { useAtomValue } from "jotai";
 import React, { useEffect, useMemo, useState } from "react";
 
 import { useTauriListen } from "@src/hooks/platform/useTauriListen";
-import { agentLiveStatusAtom } from "@src/store/session/agentLiveStatusAtom";
 import { loadSessionRoster, sessionsAtom } from "@src/store/session";
+import { agentLiveStatusAtom } from "@src/store/session/agentLiveStatusAtom";
 
-import {
-  deriveLiveSessionSummary,
-  type LiveSessionRow,
-} from "./liveSessionMonitorModel";
 import { NativeWorkerOverviewSection } from "./NativeWorkerOverviewSection";
-import { countQuietSessions, phaseAdvisory } from "./sessionStallAdvisory";
 import {
+  type LiveSessionRow,
+  deriveLiveSessionSummary,
+} from "./liveSessionMonitorModel";
+import {
+  NATIVE_PHASE_EVENT,
+  type NativePhaseMap,
+  clearNativePhase,
+  ingestNativePhase,
+} from "./nativePhaseEvents";
+import {
+  SCHEDULER_HEARTBEAT_EVENT,
+  type SchedulerPulseMap,
   countSchedulerPulseHealth,
   ingestSchedulerPulse,
   schedulerPulseHealth,
   schedulerPulseMessage,
-  SCHEDULER_HEARTBEAT_EVENT,
-  type SchedulerPulseMap,
 } from "./schedulerHeartbeat";
-import {
-  clearNativePhase,
-  ingestNativePhase,
-  NATIVE_PHASE_EVENT,
-  type NativePhaseMap,
-} from "./nativePhaseEvents";
+import { countQuietSessions, phaseAdvisory } from "./sessionStallAdvisory";
 
 interface LiveSessionMonitorPanelProps {
   onClose: () => void;
@@ -54,31 +54,58 @@ const STATUS_LABELS: Record<string, string> = {
   archived: "เก็บแล้ว / Archived",
 };
 
-function StatusRow({ row, caution, workerPulseNote, workerPulseAlert }: {
+function StatusRow({
+  row,
+  caution,
+  workerPulseNote,
+  workerPulseAlert,
+}: {
   row: LiveSessionRow;
   caution: string | null;
   workerPulseNote: string | null;
   workerPulseAlert: boolean;
 }) {
-  const color = row.phase === "working"
-    ? "bg-cyan-500"
-    : row.phase === "attention"
-      ? "bg-amber-500"
-      : row.phase === "terminal"
-        ? "bg-slate-400"
-        : "bg-slate-300";
+  const color =
+    row.phase === "working"
+      ? "bg-cyan-500"
+      : row.phase === "attention"
+        ? "bg-amber-500"
+        : row.phase === "terminal"
+          ? "bg-slate-400"
+          : "bg-slate-300";
   return (
-    <li className="rounded-xl border border-border-1 bg-bg-1 p-3" data-testid="live-session-row">
+    <li
+      className="rounded-xl border border-border-1 bg-bg-1 p-3"
+      data-testid="live-session-row"
+    >
       <div className="flex min-w-0 items-start gap-2">
-        <span aria-hidden className={"mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full " + color} />
+        <span
+          aria-hidden
+          className={"mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full " + color}
+        />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-semibold text-text-1" title={row.title}>
+          <p
+            className="truncate text-[13px] font-semibold text-text-1"
+            title={row.title}
+          >
             {row.title}
           </p>
-          <p className="text-xs text-text-2">{STATUS_LABELS[row.status] ?? "ไม่ทราบสถานะ / Unknown"}</p>
-          <p className="mt-1 break-words text-[11px] text-text-3">{row.detail}</p>
-          {caution && <p className="mt-1 text-[11px] text-amber-600">{caution}</p>}
-          {workerPulseNote && <p className={`mt-1 text-[11px] ${workerPulseAlert ? "text-amber-600" : "text-text-3"}`}>{workerPulseNote}</p>}
+          <p className="text-xs text-text-2">
+            {STATUS_LABELS[row.status] ?? "ไม่ทราบสถานะ / Unknown"}
+          </p>
+          <p className="mt-1 text-[11px] break-words text-text-3">
+            {row.detail}
+          </p>
+          {caution && (
+            <p className="mt-1 text-[11px] text-amber-600">{caution}</p>
+          )}
+          {workerPulseNote && (
+            <p
+              className={`mt-1 text-[11px] ${workerPulseAlert ? "text-amber-600" : "text-text-3"}`}
+            >
+              {workerPulseNote}
+            </p>
+          )}
           {row.oldPersistedStatus && (
             <p className="mt-1 text-[11px] text-amber-600">
               ข้อมูลสถานะในฐานข้อมูลเก่ากว่า 10 นาที · ตรวจสอบเพิ่มเติม
@@ -90,15 +117,21 @@ function StatusRow({ row, caution, workerPulseNote, workerPulseAlert }: {
   );
 }
 
-export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorPanelProps) {
+export default function LiveSessionMonitorPanel({
+  onClose,
+}: LiveSessionMonitorPanelProps) {
   const sessions = useAtomValue(sessionsAtom);
   const hookStatuses = useAtomValue(agentLiveStatusAtom);
   const [activeOnly, setActiveOnly] = useState(true);
   const [nowMs, setNowMs] = useState(Date.now);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
-  const [nativePhases, setNativePhases] = useState<NativePhaseMap>(() => new Map());
-  const [schedulerPulses, setSchedulerPulses] = useState<SchedulerPulseMap>(() => new Map());
+  const [nativePhases, setNativePhases] = useState<NativePhaseMap>(
+    () => new Map()
+  );
+  const [schedulerPulses, setSchedulerPulses] = useState<SchedulerPulseMap>(
+    () => new Map()
+  );
 
   // Four low-volume Tauri event subscriptions only while expanded.
   // Payloads are validated and minimized before state ingestion. Never
@@ -133,7 +166,12 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
   }, [onClose]);
 
   const summary = useMemo(
-    () => deriveLiveSessionSummary(sessions, hookStatuses, { activeOnly, nowMs, nativePhases }),
+    () =>
+      deriveLiveSessionSummary(sessions, hookStatuses, {
+        activeOnly,
+        nowMs,
+        nativePhases,
+      }),
     [sessions, hookStatuses, activeOnly, nowMs, nativePhases]
   );
 
@@ -172,17 +210,27 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
       aria-modal="false"
       aria-label="Live Session Monitor"
       data-testid="live-session-monitor-panel"
-      className="absolute bottom-12 right-0 flex h-[min(72vh,610px)] w-[min(calc(100vw-24px),420px)] flex-col overflow-hidden rounded-2xl border border-border-2 bg-bg-2 text-text-1 shadow-2xl"
+      className="absolute right-0 bottom-12 flex h-[min(72vh,610px)] w-[min(calc(100vw-24px),420px)] flex-col overflow-hidden rounded-2xl border border-border-2 bg-bg-2 text-text-1 shadow-2xl"
     >
-      <header className="shrink-0 border-b border-border-1 px-4 pb-3 pt-4">
+      <header className="shrink-0 border-b border-border-1 px-4 pt-4 pb-3">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-cyan-600">TP Agent Studio</span>
+            <span className="text-[10px] font-bold tracking-widest text-cyan-600 uppercase">
+              TP Agent Studio
+            </span>
             <h2 className="text-lg font-semibold">Live Session Monitor</h2>
-            <p className="text-xs text-text-3">สถานะจากแอป · ไม่ใช่การตรวจจับ Hang โดยตรง</p>
+            <p className="text-xs text-text-3">
+              สถานะจากแอป · ไม่ใช่การตรวจจับ Hang โดยตรง
+            </p>
           </div>
-          <button type="button" className="rounded-lg px-2 py-1 text-text-2 hover:bg-fill-2"
-            aria-label="Close Session Monitor" onClick={onClose}>✕</button>
+          <button
+            type="button"
+            className="rounded-lg px-2 py-1 text-text-2 hover:bg-fill-2"
+            aria-label="Close Session Monitor"
+            onClick={onClose}
+          >
+            ✕
+          </button>
         </div>
         <div className="mt-4 grid grid-cols-3 gap-2">
           <div className="rounded-xl bg-fill-1 p-2 text-center">
@@ -198,23 +246,40 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
             <div className="text-[10px] text-text-2">ข้อมูลเก่า</div>
           </div>
         </div>
-        <p className="mt-2 text-[11px] text-text-3" data-testid="session-monitor-silence-summary">
-          Phase silence: {quietCounts.quiet} quiet ≥5m · {quietCounts.expired} old ≥60m
+        <p
+          className="mt-2 text-[11px] text-text-3"
+          data-testid="session-monitor-silence-summary"
+        >
+          Phase silence: {quietCounts.quiet} quiet ≥5m · {quietCounts.expired}{" "}
+          old ≥60m
           {" · "}Only {quietCounts.observed} observed native turns
         </p>
-        <p className="mt-1 text-[11px] text-text-3" data-testid="session-monitor-worker-heartbeat-summary">
-          Scheduler heartbeat: {workerPulseCounts.recent} recent · {workerPulseCounts.late} late ≥45s
-          {" · "}{workerPulseCounts.missing} missing ≥2m
-          {" · "}{workerPulseCounts.unknown} unobserved
+        <p
+          className="mt-1 text-[11px] text-text-3"
+          data-testid="session-monitor-worker-heartbeat-summary"
+        >
+          Scheduler heartbeat: {workerPulseCounts.recent} recent ·{" "}
+          {workerPulseCounts.late} late ≥45s
+          {" · "}
+          {workerPulseCounts.missing} missing ≥2m
+          {" · "}
+          {workerPulseCounts.unknown} unobserved
         </p>
         <div className="mt-3 flex items-center justify-between gap-2 text-xs">
           <label className="flex items-center gap-2 text-text-2">
-            <input type="checkbox" checked={activeOnly}
-              onChange={(event) => setActiveOnly(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={activeOnly}
+              onChange={(event) => setActiveOnly(event.target.checked)}
+            />
             เฉพาะที่กำลังทำงาน / Active
           </label>
-          <button type="button" onClick={() => void refresh()} disabled={refreshing}
-            className="rounded-lg border border-border-2 px-3 py-1.5 font-semibold hover:bg-fill-1 disabled:opacity-50">
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            disabled={refreshing}
+            className="rounded-lg border border-border-2 px-3 py-1.5 font-semibold hover:bg-fill-1 disabled:opacity-50"
+          >
             {refreshing ? "กำลังโหลด..." : "↻ Refresh"}
           </button>
         </div>
@@ -227,27 +292,36 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         <NativeWorkerOverviewSection />
         <p className="mb-3 text-[11px] text-text-3">
-          แสดง {summary.visibleCount} จาก {summary.totalLoaded} Session ในรายการที่โหลดแล้ว
+          แสดง {summary.visibleCount} จาก {summary.totalLoaded} Session
+          ในรายการที่โหลดแล้ว
           {summary.truncated ? " (จำกัดสูงสุด 50 รายการ)" : ""}
         </p>
         {summary.rows.length ? (
           <ul className="space-y-2">
             {summary.rows.map((row) => {
-              const advisory = row.phase === "working" && row.source === "native-phase"
-                ? phaseAdvisory(row.id, nativePhases, nowMs) : null;
-              const caution = advisory?.state === "quiet" || advisory?.state === "expired"
-                ? advisory.message : null;
-              const pulse = row.phase === "working" && row.source !== "cli-hook"
-                ? schedulerPulseHealth(schedulerPulses.get(row.id), nowMs) : "unknown";
-              const workerPulseNote = pulse === "unknown"
-                ? null : schedulerPulseMessage(pulse);
-              return <StatusRow
-                row={row}
-                caution={caution}
-                workerPulseNote={workerPulseNote}
-                workerPulseAlert={pulse === "late" || pulse === "missing"}
-                key={row.id}
-              />;
+              const advisory =
+                row.phase === "working" && row.source === "native-phase"
+                  ? phaseAdvisory(row.id, nativePhases, nowMs)
+                  : null;
+              const caution =
+                advisory?.state === "quiet" || advisory?.state === "expired"
+                  ? advisory.message
+                  : null;
+              const pulse =
+                row.phase === "working" && row.source !== "cli-hook"
+                  ? schedulerPulseHealth(schedulerPulses.get(row.id), nowMs)
+                  : "unknown";
+              const workerPulseNote =
+                pulse === "unknown" ? null : schedulerPulseMessage(pulse);
+              return (
+                <StatusRow
+                  row={row}
+                  caution={caution}
+                  workerPulseNote={workerPulseNote}
+                  workerPulseAlert={pulse === "late" || pulse === "missing"}
+                  key={row.id}
+                />
+              );
             })}
           </ul>
         ) : (
@@ -257,8 +331,13 @@ export default function LiveSessionMonitorPanel({ onClose }: LiveSessionMonitorP
         )}
       </div>
       <footer className="shrink-0 border-t border-border-1 px-4 py-3 text-[11px] text-text-3">
-        <p>Live updates จาก Rust Phase + Scheduler Worker และ CLI Hook · ไม่โหลด Transcript อัตโนมัติ</p>
-        <p>“ข้อมูลเก่า” = เวลาบันทึกสถานะเก่า ไม่ใช่หลักฐานว่า Provider/Tool ค้าง</p>
+        <p>
+          Live updates จาก Rust Phase + Scheduler Worker และ CLI Hook · ไม่โหลด
+          Transcript อัตโนมัติ
+        </p>
+        <p>
+          “ข้อมูลเก่า” = เวลาบันทึกสถานะเก่า ไม่ใช่หลักฐานว่า Provider/Tool ค้าง
+        </p>
       </footer>
     </section>
   );

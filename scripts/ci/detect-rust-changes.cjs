@@ -21,13 +21,17 @@ const RUST_RELEVANT_PREFIXES = Object.freeze([
   // The Rust CI job shells out to these before building (sidecar prep, build
   // helpers), so their behavior is part of the build.
   "scripts/tauri/",
-  // Workflow definitions and composite actions decide how (and whether) the
-  // Rust jobs run.
-  ".github/workflows/",
+  // Reusable actions can affect the Rust build, so retain their scope.
   ".github/actions/",
 ]);
 
 const RUST_RELEVANT_FILES = new Set([
+  // Only workflows that configure Rust builds are Rust-relevant.
+  // Otherwise an unrelated Python/docs workflow forces a 40+ minute compile.
+  ".github/workflows/ci.yml",
+  ".github/workflows/warm-rust-cache.yml",
+  ".github/workflows/nightly-full-checks.yml",
+  ".github/workflows/release.yaml",
   // The gate itself and its test: a diff that edits the detector must not be
   // trusted to scope itself.
   "scripts/ci/detect-rust-changes.cjs",

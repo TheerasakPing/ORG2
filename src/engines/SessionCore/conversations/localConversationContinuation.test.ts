@@ -1779,7 +1779,7 @@ describe("local native conversation continuation", () => {
     expect(mocks.markTerminal).not.toHaveBeenCalled();
   });
 
-  it("keeps an interrupted turn recovery-pending until its native user anchor converges", async () => {
+  it("retires an interrupted turn whose native user anchor cannot be recovered", async () => {
     mocks.getTerminal.mockReturnValue({
       generation: 3,
       status: "cancelled",
@@ -1791,10 +1791,6 @@ describe("local native conversation continuation", () => {
       status: "cancelled",
       updatedAt: "2026-08-29T00:01:00.000Z",
     });
-    // The provider accepted the send but its native transcript has not exposed
-    // even the current user item yet. This is not the same as a user-only
-    // interrupted turn, whose matching anchor makes resolveSettledTail return
-    // a durable empty array.
     mocks.sendMessage.mockResolvedValueOnce(undefined);
 
     await expect(
@@ -1806,9 +1802,43 @@ describe("local native conversation continuation", () => {
         target,
         turnIntentId: "turn-cancelled-before-anchor",
       })
-    ).rejects.toBeInstanceOf(QueuedConversationRecoveryPendingError);
+    ).rejects.toBeInstanceOf(QueuedConversationRecoveryBlockedError);
 
+    expect(mocks.recoverNativeAfterMismatch).toHaveBeenCalledOnce();
     expect(mocks.markTerminal).not.toHaveBeenCalled();
+  });
+
+  it("recovers an interrupted turn's user anchor and partial output before settling", async () => {
+    mocks.cliWaitForTurnTerminal.mockResolvedValueOnce({
+      sessionId: "agentsession-child",
+      turnIntentId: "cancelled-partial-flush",
+      status: "cancelled",
+      updatedAt: "2026-08-29T00:01:00.000Z",
+    });
+    mocks.sendMessage.mockResolvedValueOnce(undefined);
+    mocks.recoverNativeAfterMismatch.mockResolvedValueOnce([
+      event("u1", "user", "original question"),
+      event("u2", "user", "continue"),
+      event("a2", "assistant", "partial answer"),
+    ]);
+
+    const result = await continueLocalConversation({
+      root,
+      title: "Interrupted transcript flush",
+      timeline: [event("u1", "user", "original question")],
+      displayText: "continue",
+      target,
+      turnIntentId: "cancelled-partial-flush",
+    });
+
+    expect(result.terminalStatus).toBe("cancelled");
+    expect(result.agentTail).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ displayText: "partial answer" }),
+      ])
+    );
+    expect(mocks.recoverNativeAfterMismatch).toHaveBeenCalledOnce();
+    expect(mocks.sendMessage).toHaveBeenCalledOnce();
   });
 
   it("settles a failed process with unchanged history after bounded native recovery", async () => {

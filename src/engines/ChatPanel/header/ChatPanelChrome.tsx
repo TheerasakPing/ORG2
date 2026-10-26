@@ -4,6 +4,7 @@ import { createLogger } from "@src/hooks/logger";
 import { useCollapsedSidebarChromeOffset } from "@src/hooks/ui/sidebar/useCollapsedSidebarChromeOffset";
 import { usePaneLayoutInsetTransition } from "@src/scaffold/AppLayout/usePaneLayoutInsetTransition";
 import { CollapsedSidebarButton } from "@src/scaffold/NavigationSidebar/CollapsedSidebarButton";
+import { maxWindow } from "@src/util/platform/ipcRenderer";
 import { isWindows } from "@src/util/platform/tauri";
 
 import {
@@ -68,21 +69,15 @@ export function ChatPanelChrome({
   // controls clear of the content — the tab row's job until it folds away.
   // Padding the wrapper rather than the row keeps the row's 36px content band
   // intact, and makes it the positioning context the sidebar button centers in.
-  // The window API is pulled in on interaction so it stays out of the boot graph.
-  const handleCollapsedHeaderMouseDown = (
-    event: React.MouseEvent<HTMLDivElement>
-  ) => {
-    if (windowsHost || event.button !== 0) return;
+  const handleHeaderMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (windowsHost || event.button !== 0 || event.detail !== 2) return;
     if (!shouldStartHeaderDragFromTarget(event.target as Element | null)) {
       return;
     }
-    const maximize = event.detail === 2;
     event.preventDefault();
-    void import("@src/util/platform/ipcRenderer")
-      .then(({ maxWindow, startWindowDrag }) =>
-        maximize ? maxWindow() : startWindowDrag()
-      )
-      .catch((error) => log.error("Window chrome action failed", error));
+    void maxWindow().catch((error) =>
+      log.error("Window chrome action failed", error)
+    );
   };
 
   const publishedHeaderRow = tabRowCollapsed ? (
@@ -90,7 +85,7 @@ export function ChatPanelChrome({
       className="workspace-header header-tab-group @container/launchpad-header relative z-40 flex shrink-0 flex-col"
       data-testid="chat-panel-collapsed-header"
       data-tauri-drag-region={windowsHost ? undefined : true}
-      onMouseDown={handleCollapsedHeaderMouseDown}
+      onMouseDown={handleHeaderMouseDown}
       style={
         {
           paddingTop: CHAT_PANEL_HEADER_TOP_PADDING_PX,
@@ -147,6 +142,7 @@ export function ChatPanelChrome({
           }`}
           data-testid="chat-panel-header"
           data-tauri-drag-region={windowsHost ? undefined : true}
+          onMouseDown={handleHeaderMouseDown}
           style={
             {
               paddingLeft: shouldOffsetHeaderForCollapsedSidebar

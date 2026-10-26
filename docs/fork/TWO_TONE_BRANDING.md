@@ -21,7 +21,7 @@ SVG is the editable artwork. Rasterize to 8-bit RGBA PNG (not indexed PNG, which
 
 ## Remaining branding work
 
-- The historical `light` and `rainbow` optional Dock variants still use legacy upstream art; new fork-owned two-tone alternatives and settings migration are required before shipping. The default `dark` variant now uses TP Agent Studio art.
+- The optional `light` and vibrant `rainbow` (active working) Dock variants have been fully migrated to fork-owned TP Agent Studio geometry and artwork, eliminating legacy upstream Roman II art while matching the default `dark` variant.
 - Tray icon remains a platform-appropriate monochrome template; separately update its glyph before final release.
 - Microsoft Store tile logos, mobile icons and UI splash/logo illustrations still need a dedicated rebranding pass.
 - Update external URL/callback, cloud identity and public product copy only with ownership/compatibility tests.

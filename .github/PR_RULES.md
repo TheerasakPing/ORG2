@@ -139,6 +139,22 @@ This exception does not authorize merging incompatible dependency updates.
   authorize pushing or creating a pull request. Creating a pull request does
   not authorize merging it.
 
+## Agent execution and quality gates
+
+- For each change, link or identify its task-specific checklist, Team Lead,
+  agent-owned subtasks, acceptance criteria, and reviewer findings as required
+  by [Agent Team Workflow](../docs/engineering/AGENT_TEAM_WORKFLOW.md).
+- Every subtask MUST have recorded targeted checks, smoke-test evidence and
+  E2E test or boundary-appropriate end-to-end walkthrough evidence, including
+  the exact commands, observed results and test-environment limitations.
+- Mark unavailable, skipped, or failing gates BLOCKED or FAIL; do not relabel
+  them PASS or claim production readiness. List them in the PR description.
+- The Team Lead MUST review every subtask and record an explicit acceptance or
+  rejection before delivery. Team Lead sign-off does not replace the separate
+  independent/human approval required by branch protection or release policy.
+- A PR can be opened for review with clearly disclosed blockers; do not merge,
+  release, or claim completion until applicable acceptance gates are satisfied.
+
 ## Agent handoff
 
 Any agent that creates or updates a pull request must:

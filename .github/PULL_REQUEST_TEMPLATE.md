@@ -21,3 +21,5 @@
 - [ ] I ran the relevant checks, or explained why they were not run.
 - [ ] No secrets, private config, generated output, or unrelated formatting changes are included.
 - [ ] Docs, screenshots, and locale updates are included when the change needs them.
+- [ ] I linked the task planner and named the Team Lead and agent owner(s).
+- [ ] I recorded per-subtask targeted checks, smoke and E2E evidence (or explicit BLOCKED/FAIL), plus Team Lead review decisions.

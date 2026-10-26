@@ -10,6 +10,32 @@ Skill routing is **advisory**; use judgment based on PR size and risk. Explicit 
 
 ---
 
+## Mandatory Agent Team Execution Policy
+
+**Every user-requested task, including documentation-only changes and follow-ups, MUST follow**
+[Agent Team Workflow](docs/engineering/AGENT_TEAM_WORKFLOW.md). This is a delivery
+contract, not an optional methodology or skill. Existing safety, PR, test, and
+platform-specific requirements still apply.
+
+1. **Plan first:** create/update a task-specific Markdown checklist using
+   [Task Checklist Template](docs/engineering/TASK_CHECKLIST_TEMPLATE.md) before editing.
+   Define atomic tasks, dependencies, owners, acceptance criteria and risks.
+2. **Lead assigns every task:** designate a Team Lead and an accountable
+   execution agent for each subtask; assign a reviewer independently whenever
+   possible. Never imply that unavailable agents actually executed a review.
+3. **Evidence for every task:** executing agents must run or explicitly record
+   blockers for targeted checks, a smoke test, and an end-to-end test or contract
+   walkthrough appropriate to the changed boundary. A skipped/unavailable test
+   is BLOCKED, never PASS; a docs walkthrough is not a substitute for app E2E.
+4. **Lead review gate:** the Team Lead reviews each subtask's diff, test logs,
+   security/rollback impact and acceptance evidence. Failed or blocked gates
+   prevent marking the subtask DONE or the release READY.
+5. **Handoff:** report the planner, owners, real commands and results, review
+   decision, outstanding blockers, and next action. Do not claim independent
+   human review or production certification without evidence.
+
+---
+
 ## Skill Routing Table
 
 | Scenario                                                                                                                   | Skill to invoke                     | When                                                                                                                                          |

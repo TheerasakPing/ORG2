@@ -46,6 +46,7 @@
 - [x] Continue independent startup reconciliation phases after a partial failure so stale in-flight session cleanup is still attempted; see [multi-session recovery audit](SESSION_STALL_RECOVERY.md).
 - [ ] Implement bounded progress/heartbeat diagnostics for genuinely hung provider or Tool futures, with cancellation semantics that never replay side-effectful work.
 - [x] Add bounded, synthetic Rust `DialogScheduler` stress tests for 1/5/20/50 concurrent sessions, targeted cancellation, dead-worker no-replay isolation and queue capacity (CI confirmed: macOS Rust workspace tests, macOS/Windows Clippy and CodeQL passed on PR #23; real provider/tool load still unverified). See [Multi-Session Stress Lab](MULTI_SESSION_STRESS_LAB.md).
+- [x] Add standalone synthetic provider/tool timeout/error/never-resolving future and isolated SQLite WAL 5/20/50 writer/read-snapshot fault-injection cases (added to PR, final CI pending). See [Fault Injection Lab](PROVIDER_TOOL_SQLITE_FAULT_LAB.md).
 - [ ] Stress-test 1/5/20/50 concurrent sessions under live provider/tool load and validate clean shutdown/restart on all three platforms.
 
 **Acceptance:** no double-owned memory consolidation; session/tool cancellation leaves no orphaned jobs; migration failures cannot leave an app silently running on a partially upgraded schema.

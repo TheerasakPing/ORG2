@@ -67,12 +67,15 @@ export const TurnChangedFilesTreeCard: React.FC<TurnChangedFilesTreeCardProps> =
       for (const file of tree.rootFiles) {
         lines.push(`${file.fileName} (+${file.additions} -${file.deletions})`);
       }
-      void navigator.clipboard.writeText(lines.join("\n")).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      }).catch(() => {
-        setCopied(false);
-      });
+      void navigator.clipboard
+        .writeText(lines.join("\n"))
+        .then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        })
+        .catch(() => {
+          setCopied(false);
+        });
     }, [tree]);
 
     const formattedTime = useMemo(() => {

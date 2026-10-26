@@ -74,7 +74,7 @@ pub fn global_turn_governor() -> &'static Arc<Semaphore> {
         let max_permits = std::env::var("TP_AGENT_MAX_CONCURRENT_TURNS")
             .ok()
             .and_then(|val| val.parse::<usize>().ok())
-            .unwrap_or_else(|| {
+            .unwrap_or({
                 if cfg!(test) {
                     // In synthetic multi-session tests (e.g. 50 barrier-waiting sessions),
                     // allow all synthetic test sessions to enter concurrently so barriers do not deadlock.

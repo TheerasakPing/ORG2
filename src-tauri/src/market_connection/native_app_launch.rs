@@ -56,6 +56,17 @@ fn command_with_account_home(
 ) -> Result<Command, String> {
     bundle_id(agent)?;
     profile.validate(agent)?;
+    // ORGII_HOME is a process-global compatibility override. Snapshot the
+    // native profile root once so concurrent test helpers (or other callers)
+    // cannot split one launch across different account/profile directories.
+    let profile_root = profile.root();
+    let profile_home = profile_root.join(if agent == "codex" { "home" } else { "Claude-3p" });
+    let user_data = if agent == "codex" {
+        profile_root.join("electron")
+    } else {
+        profile_home.clone()
+    };
+    let system_home = profile_root.join("system-home");
     let mut command = Command::new("/usr/bin/open");
     command.arg("-n").arg("-a").arg(bundle);
     // open --env changes the launched process, whereas Command::env_remove
@@ -69,8 +80,8 @@ fn command_with_account_home(
     home.push(account_home);
     command.arg("--env").arg(home);
     for (name, path) in [
-        ("CFFIXED_USER_HOME", profile.system_home()),
-        ("CLAUDE_CONFIG_DIR", profile.system_home().join(".claude")),
+        ("CFFIXED_USER_HOME", system_home.clone()),
+        ("CLAUDE_CONFIG_DIR", system_home.join(".claude")),
     ] {
         command
             .arg("--env")
@@ -91,18 +102,18 @@ fn command_with_account_home(
             .arg("CODEX_APP_SERVER_USE_LOCAL_DAEMON=0");
         command
             .arg("--env")
-            .arg(format!("CODEX_HOME={}", profile.home().display()));
+            .arg(format!("CODEX_HOME={}", profile_home.display()));
         command
             .arg("--env")
-            .arg(format!("CODEX_SQLITE_HOME={}", profile.home().display()));
+            .arg(format!("CODEX_SQLITE_HOME={}", profile_home.display()));
         command.arg("--env").arg(format!(
             "CODEX_ELECTRON_USER_DATA_PATH={}",
-            profile.user_data().display()
+            user_data.display()
         ));
     }
     command
         .arg("--args")
-        .arg(format!("--user-data-dir={}", profile.user_data().display()));
+        .arg(format!("--user-data-dir={}", user_data.display()));
     Ok(command)
 }
 #[cfg(any(target_os = "macos", all(test, unix)))]
@@ -272,10 +283,29 @@ mod tests {
                 .map(|v| v.to_string_lossy().into_owned())
                 .collect::<Vec<_>>();
             assert_eq!(&args[..3], ["-n", "-a", "/Applications/Vendor App.app"]);
+            // Assert a single captured launch root, not a second resolution of
+            // ORGII_HOME: other Rust tests can change that process-wide env var.
+            let user_data_arg = args
+                .last()
+                .and_then(|value| value.strip_prefix("--user-data-dir="))
+                .expect("isolated native user-data directory");
+            let profile_root = Path::new(user_data_arg)
+                .parent()
+                .expect("native profile directory");
             assert_eq!(
-                args.last().unwrap(),
-                &format!("--user-data-dir={}", profile.user_data().display())
+                Path::new(user_data_arg),
+                profile_root.join(if agent == "codex" { "electron" } else { "Claude-3p" })
             );
+            assert_eq!(
+                profile_root.parent().and_then(Path::file_name),
+                Some(std::ffi::OsStr::new(agent))
+            );
+            assert_eq!(
+                profile_root.parent().and_then(Path::parent).and_then(Path::file_name),
+                Some(std::ffi::OsStr::new("native-app-profiles"))
+            );
+            let profile_home = profile_root.join(if agent == "codex" { "home" } else { "Claude-3p" });
+            let system_home = profile_root.join("system-home");
             assert!(!args.iter().any(|v| v.contains("claude://") || v == "-b"));
             if agent == "codex" {
                 assert!(args.contains(
@@ -283,22 +313,22 @@ mod tests {
                 ));
                 assert!(args.contains(&"CODEX_APP_SERVER_FORCE_CLI=1".into()));
                 assert!(args.contains(&"CODEX_APP_SERVER_USE_LOCAL_DAEMON=0".into()));
-                assert!(args.contains(&format!("CODEX_HOME={}", profile.home().display())));
-                assert!(args.contains(&format!("CODEX_SQLITE_HOME={}", profile.home().display())));
+                assert!(args.contains(&format!("CODEX_HOME={}", profile_home.display())));
+                assert!(args.contains(&format!("CODEX_SQLITE_HOME={}", profile_home.display())));
                 assert!(args.contains(&format!(
                     "CODEX_ELECTRON_USER_DATA_PATH={}",
-                    profile.user_data().display()
+                    user_data_arg
                 )));
             }
             assert!(args.contains(&format!("HOME={}", account_home.path().display())));
-            assert!(!args.contains(&format!("HOME={}", profile.system_home().display())));
+            assert!(!args.contains(&format!("HOME={}", system_home.display())));
             assert!(args.contains(&format!(
                 "CFFIXED_USER_HOME={}",
-                profile.system_home().display()
+                system_home.display()
             )));
             assert!(args.contains(&format!(
                 "CLAUDE_CONFIG_DIR={}",
-                profile.system_home().join(".claude").display()
+                system_home.join(".claude").display()
             )));
             for name in [
                 "CLAUDE_USER_DATA_DIR",

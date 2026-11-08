@@ -53,12 +53,28 @@ jobs:
           assert content.count(before) == 1, "LSP ZIP API adapter anchor changed"
           p.write_text(content.replace(before, after))
           PY
+      - name: Adapt agent-core AI Researcher ZIP entry name API
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src-tauri/crates/agent-core/src/specialization/skills/loader/source_dirs.rs")
+          text = p.read_text()
+          old = '        let name = file.name().to_string();'
+          new = chr(10).join([
+              "        let name = file.name()",
+              '            .map_err(|err| format!("Invalid AI Researcher ZIP entry name: {err}"))?',
+              "            .into_owned();",
+          ])
+          assert text.count(old) == 1, "agent-core ZIP API adapter anchor changed"
+          p.write_text(text.replace(old, new))
+          PY
       - name: Emit manifest and lock diff for review
         run: |
           set -euo pipefail
           git diff --check
           echo '---ZIP9_PATCH_BEGIN---'
-          git diff --no-ext-diff -- src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/crates/lsp/src/install_pipeline.rs
+          git diff --no-ext-diff -- src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/crates/lsp/src/install_pipeline.rs src-tauri/crates/agent-core/src/specialization/skills/loader/source_dirs.rs
           echo '---ZIP9_PATCH_END---'
       - uses: actions/upload-artifact@v4
         with:
@@ -67,6 +83,7 @@ jobs:
             src-tauri/Cargo.toml
             src-tauri/Cargo.lock
             src-tauri/crates/lsp/src/install_pipeline.rs
+            src-tauri/crates/agent-core/src/specialization/skills/loader/source_dirs.rs
           if-no-files-found: error
           retention-days: 7
 

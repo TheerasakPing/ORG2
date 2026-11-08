@@ -96,6 +96,22 @@ jobs:
           assert src.count(old) == 1, "ZIP 9 compatibility adapter source changed"
           p.write_text(src.replace(old, new))
           PY
+      - name: Adapt agent-core ZIP 9 archive entry name API
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src-tauri/crates/agent-core/src/specialization/skills/loader/source_dirs.rs")
+          text = p.read_text()
+          old = '        let name = file.name().to_string();'
+          new = chr(10).join([
+              "        let name = file.name()",
+              '            .map_err(|err| format!("Invalid AI Researcher ZIP entry name: {err}"))?',
+              "            .into_owned();",
+          ])
+          assert text.count(old) == 1, "agent-core ZIP API adapter anchor changed"
+          p.write_text(text.replace(old, new))
+          PY
       - name: Print all checked integration patch sections
         run: |
           set -euo pipefail
@@ -105,7 +121,8 @@ jobs:
             src-tauri/Cargo.toml \
             src-tauri/Cargo.lock \
             src-tauri/src/infrastructure/spreadsheet_xlsx_tests.rs \
-            src-tauri/crates/lsp/src/install_pipeline.rs
+            src-tauri/crates/lsp/src/install_pipeline.rs \
+            src-tauri/crates/agent-core/src/specialization/skills/loader/source_dirs.rs
           echo '---UNIFIED_RUSTSEC_PATCH_END---'
       - uses: actions/upload-artifact@v4
         with:
@@ -115,6 +132,7 @@ jobs:
             src-tauri/Cargo.lock
             src-tauri/src/infrastructure/spreadsheet_xlsx_tests.rs
             src-tauri/crates/lsp/src/install_pipeline.rs
+            src-tauri/crates/agent-core/src/specialization/skills/loader/source_dirs.rs
           if-no-files-found: error
           retention-days: 7
 
@@ -128,8 +146,27 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: combined-cargo-and-tested-sources
-          path: .
+          path: src-tauri
       - uses: dtolnay/rust-toolchain@stable
+      - name: Verify tested dependency artifact is installed correctly
+        working-directory: src-tauri
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/verified-candidate.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          with open(os.environ["RUNNER_TEMP"] + "/verified-candidate.json", encoding="utf-8") as f:
+              packages = json.load(f)["packages"]
+          zip_versions = sorted({p["version"] for p in packages if p["name"] == "zip"})
+          assert zip_versions and all(v.startswith("9.") for v in zip_versions), (
+              f"Candidate Cargo.lock not installed; ZIP versions: {zip_versions}"
+          )
+          assert 'calamine = "0.38.0"' in Path("Cargo.toml").read_text()
+          assert 'rust_xlsxwriter = "0.102.0"' in Path("Cargo.toml").read_text()
+          assert "Invalid AI Researcher ZIP entry name" in Path("crates/agent-core/src/specialization/skills/loader/source_dirs.rs").read_text()
+          print("Validated downloaded combined dependency and source artifact.")
+          PY
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Full workspace audit (fail closed)
@@ -146,7 +183,26 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: combined-cargo-and-tested-sources
-          path: .
+          path: src-tauri
+      - name: Verify tested dependency artifact is installed correctly
+        working-directory: src-tauri
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/verified-candidate.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          with open(os.environ["RUNNER_TEMP"] + "/verified-candidate.json", encoding="utf-8") as f:
+              packages = json.load(f)["packages"]
+          zip_versions = sorted({p["version"] for p in packages if p["name"] == "zip"})
+          assert zip_versions and all(v.startswith("9.") for v in zip_versions), (
+              f"Candidate Cargo.lock not installed; ZIP versions: {zip_versions}"
+          )
+          assert 'calamine = "0.38.0"' in Path("Cargo.toml").read_text()
+          assert 'rust_xlsxwriter = "0.102.0"' in Path("Cargo.toml").read_text()
+          assert "Invalid AI Researcher ZIP entry name" in Path("crates/agent-core/src/specialization/skills/loader/source_dirs.rs").read_text()
+          print("Validated downloaded combined dependency and source artifact.")
+          PY
       - name: Install Tauri Linux toolchain prerequisites
         run: |
           sudo apt-get update

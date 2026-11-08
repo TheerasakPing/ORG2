@@ -685,22 +685,21 @@ mod tests {
 
         let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
         writer
-            .start_file(
-                "../../outside/rust-analyzer",
-                SimpleFileOptions::default(),
-            )
+            .start_file("../outside/rust-analyzer", SimpleFileOptions::default())
             .unwrap();
         writer.write_all(b"trusted-fixture-bytes").unwrap();
         let data = writer.finish().unwrap().into_inner();
 
         let temp = tempfile::tempdir().unwrap();
-        extract_zip(&data, temp.path(), "rust-analyzer").unwrap();
+        let bin_dir = temp.path().join("bin");
+        std::fs::create_dir(&bin_dir).unwrap();
+        extract_zip(&data, &bin_dir, "rust-analyzer").unwrap();
 
         assert_eq!(
-            std::fs::read(temp.path().join("rust-analyzer")).unwrap(),
+            std::fs::read(bin_dir.join("rust-analyzer")).unwrap(),
             b"trusted-fixture-bytes"
         );
-        assert!(!temp.path().parent().unwrap().join("outside").exists());
+        assert!(!temp.path().join("outside").exists());
     }
 
     #[test]

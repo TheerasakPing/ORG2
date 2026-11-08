@@ -1,0 +1,179 @@
+# Read-only full-workspace verification of committed RustSec remediation.
+# Do not sign, publish or weaken audit checks.
+name: Unified RustSec remediation verification
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unified-rustsec-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    name: Verify committed Cargo.lock and patched source set
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check committed immutable Cargo metadata and source adapters
+        working-directory: src-tauri
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/unified-metadata.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          with open(os.environ["RUNNER_TEMP"] + "/unified-metadata.json", encoding="utf-8") as f:
+              ps = json.load(f)["packages"]
+          found = {(p["name"], p["version"]) for p in ps}
+          required = {
+              ("quinn-proto", "0.11.18"),
+              ("rustls", "0.23.46"),
+              ("rustls-webpki", "0.103.16"),
+              ("webpki-roots", "1.0.10"),
+              ("webpki-root-certs", "1.0.10"),
+              ("libz-sys", "1.1.31"),
+              ("calamine", "0.38.0"),
+              ("rust_xlsxwriter", "0.102.0"),
+              ("zip", "9.4.2"),
+          }
+          assert not (required - found), f"Patched dependencies missing: {required - found}"
+          zips = sorted({p["version"] for p in ps if p["name"] == "zip"})
+          assert zips == ["9.4.2"], f"Legacy ZIP still resolved: {zips}"
+          manifest = Path("Cargo.toml").read_text()
+          updater = 'tauri-plugin-updater = { version = "=2.9.0", default-features = false, features = ["rustls-tls"] }'
+          assert manifest.count(updater) == 2, "Legacy updater ZIP feature must be disabled for both targets"
+          assert 'calamine = "0.38.0"' in manifest
+          assert 'rust_xlsxwriter = "0.102.0"' in manifest
+          assert "Invalid AI Researcher ZIP entry name" in Path("crates/agent-core/src/specialization/skills/loader/source_dirs.rs").read_text()
+          assert "Failed to parse ZIP entry name" in Path("crates/lsp/src/install_pipeline.rs").read_text()
+          assert "workbook_round_trip_reopens_and_persists_cell_patch" in Path("src/infrastructure/spreadsheet_xlsx_tests.rs").read_text()
+          print("Verified committed Cargo.lock and security adapters.")
+          PY
+      - name: Refuse unexpected dependency/source modifications
+        run: |
+          git diff --exit-code -- src-tauri/Cargo.toml src-tauri/Cargo.lock \
+            src-tauri/crates/agent-core/src/specialization/skills/loader/source_dirs.rs \
+            src-tauri/crates/lsp/src/install_pipeline.rs \
+            src-tauri/src/infrastructure/spreadsheet_xlsx_tests.rs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: combined-cargo-and-tested-sources
+          path: |
+            src-tauri/Cargo.toml
+            src-tauri/Cargo.lock
+            src-tauri/src/infrastructure/spreadsheet_xlsx_tests.rs
+            src-tauri/crates/lsp/src/install_pipeline.rs
+            src-tauri/crates/agent-core/src/specialization/skills/loader/source_dirs.rs
+          if-no-files-found: error
+          retention-days: 7
+
+  rustsec:
+    name: Unified RustSec audit — zero vulnerabilities required
+    needs: resolve
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: combined-cargo-and-tested-sources
+          path: src-tauri
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify tested dependency artifact is installed correctly
+        working-directory: src-tauri
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/verified-candidate.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          with open(os.environ["RUNNER_TEMP"] + "/verified-candidate.json", encoding="utf-8") as f:
+              packages = json.load(f)["packages"]
+          zip_versions = sorted({p["version"] for p in packages if p["name"] == "zip"})
+          assert zip_versions and all(v.startswith("9.") for v in zip_versions), (
+              f"Candidate Cargo.lock not installed; ZIP versions: {zip_versions}"
+          )
+          assert 'calamine = "0.38.0"' in Path("Cargo.toml").read_text()
+          assert 'rust_xlsxwriter = "0.102.0"' in Path("Cargo.toml").read_text()
+          assert "Invalid AI Researcher ZIP entry name" in Path("crates/agent-core/src/specialization/skills/loader/source_dirs.rs").read_text()
+          print("Validated downloaded combined dependency and source artifact.")
+          PY
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Full workspace audit (fail closed)
+        working-directory: src-tauri
+        run: cargo audit
+
+  linux-regression:
+    name: Linux workspace E2E + ZIP/XLSX smoke (combined candidate)
+    needs: resolve
+    runs-on: ubuntu-22.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: combined-cargo-and-tested-sources
+          path: src-tauri
+      - name: Verify tested dependency artifact is installed correctly
+        working-directory: src-tauri
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/verified-candidate.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          with open(os.environ["RUNNER_TEMP"] + "/verified-candidate.json", encoding="utf-8") as f:
+              packages = json.load(f)["packages"]
+          zip_versions = sorted({p["version"] for p in packages if p["name"] == "zip"})
+          assert zip_versions and all(v.startswith("9.") for v in zip_versions), (
+              f"Candidate Cargo.lock not installed; ZIP versions: {zip_versions}"
+          )
+          assert 'calamine = "0.38.0"' in Path("Cargo.toml").read_text()
+          assert 'rust_xlsxwriter = "0.102.0"' in Path("Cargo.toml").read_text()
+          assert "Invalid AI Researcher ZIP entry name" in Path("crates/agent-core/src/specialization/skills/loader/source_dirs.rs").read_text()
+          print("Validated downloaded combined dependency and source artifact.")
+          PY
+      - name: Install Tauri Linux toolchain prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - name: Fixture Git identity for disposable repo tests
+        run: |
+          git config --global user.name "ORG2 CI Fixture"
+          git config --global user.email "org2-ci@tests.invalid"
+          git config --global commit.gpgsign false
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: "ci-unified-rustsec"
+      - name: Build and stage debug sidecar
+        run: node scripts/tauri/prepare-sidecars.cjs --profile debug
+      - name: Native application compile
+        working-directory: src-tauri
+        run: cargo check --locked -p org2
+      - name: XLSX writer roundtrip and corrupt workbook regression
+        working-directory: src-tauri
+        run: cargo test --locked -p org2 --lib spreadsheet_xlsx
+      - name: ZIP 9 extraction confinement/invalid-input tests
+        working-directory: src-tauri
+        run: cargo test --locked -p lsp --lib test_zip_installer
+      - name: Full Linux Rust workspace regression tests
+        working-directory: src-tauri
+        run: cargo test --locked --workspace --no-fail-fast

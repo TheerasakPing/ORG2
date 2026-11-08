@@ -100,7 +100,9 @@ fn unpack_ai_research_archive(bytes: &[u8], destination: &Path) -> Result<(), St
         let mut file = archive
             .by_index(index)
             .map_err(|err| format!("Failed to read AI Researcher archive entry: {err}"))?;
-        let name = file.name().to_string();
+        let name = file.name()
+            .map_err(|err| format!("Invalid AI Researcher ZIP entry name: {err}"))?
+            .into_owned();
         let Some(relative_name) = name.strip_prefix(AI_RESEARCH_ROOT_PREFIX) else {
             continue;
         };

@@ -1,0 +1,98 @@
+# Read-only RustSec diagnostic, stacked on the reviewed TLS/QUIC patch branch.
+# Generated Cargo.lock is an artifact, not a production change.
+name: RustSec libz-sys remediation probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: libz-security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    name: Generate patched libz-sys Cargo.lock
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Update only libz-sys to fixed advisory version
+        working-directory: src-tauri
+        run: |
+          set -euo pipefail
+          cargo update -p libz-sys@1.1.29 --precise 1.1.31
+          cargo metadata --locked --format-version 1 > /dev/null
+      - name: Review Cargo-generated lock diff
+        run: |
+          set -euo pipefail
+          git diff --check
+          echo '---LIBZ_LOCK_PATCH_BEGIN---'
+          git diff --no-ext-diff -- src-tauri/Cargo.lock
+          echo '---LIBZ_LOCK_PATCH_END---'
+      - name: Upload candidate lockfile for repeatable tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: libz-patched-cargo-lock
+          path: src-tauri/Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
+
+  git-smoke:
+    name: Git Rust crates smoke on patched libz-sys
+    needs: resolve
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: libz-patched-cargo-lock
+          path: src-tauri
+      - name: Install Linux Tauri prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Configure disposable Git test identities
+        run: |
+          git config --global user.name "ORG2 CI Fixture"
+          git config --global user.email "org2-ci@tests.invalid"
+          git config --global commit.gpgsign false
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: "ci-libz-rustsec"
+      - name: Check affected git crates with immutable dependencies
+        working-directory: src-tauri
+        run: cargo check --locked -p git -p git_api -p orgtrack_core
+      - name: Git crate unit smoke with immutable dependencies
+        working-directory: src-tauri
+        run: cargo test --locked -p git --lib
+
+  audit:
+    name: RustSec libz candidate audit (must fail on remaining CVEs)
+    needs: resolve
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: libz-patched-cargo-lock
+          path: src-tauri
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Fail closed on remaining RustSec vulnerabilities
+        working-directory: src-tauri
+        run: cargo audit

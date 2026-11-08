@@ -1,0 +1,117 @@
+# Read-only experiment: remove remaining vulnerable ZIP7 XLSX writer dependency.
+# Compatibility is gated by real XLSX round-trip tests in PR #34.
+name: RustSec XLSX writer ZIP9 dependency probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xlsxwriter-zip9-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  candidate:
+    name: Resolve XLSX writer 0.102 and Cargo.lock
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Upgrade XLSX writer using Cargo dependency resolver
+        working-directory: src-tauri
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("Cargo.toml")
+          value = p.read_text()
+          old = 'rust_xlsxwriter = "0.95.0"'
+          assert value.count(old) == 1, "unexpected rust_xlsxwriter manifest requirement"
+          p.write_text(value.replace(old, 'rust_xlsxwriter = "0.102.0"'))
+          PY
+          cargo update -p rust_xlsxwriter@0.95.0 --precise 0.102.0
+          cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/xlsx-metadata.json"
+          python3 - <<'PY'
+          import json, os
+          with open(os.environ["RUNNER_TEMP"] + "/xlsx-metadata.json", encoding="utf-8") as f:
+              packages = json.load(f)["packages"]
+          found = {(p["name"], p["version"]) for p in packages}
+          assert ("rust_xlsxwriter", "0.102.0") in found
+          zips = sorted({p["version"] for p in packages if p["name"] == "zip"})
+          print("Resolved ZIP versions:", zips)
+          assert "7.2.0" not in zips, "ZIP 7.2.0 remains from another dependency owner"
+          PY
+      - name: Show Cargo-generated manifest and lockfile patch
+        run: |
+          set -euo pipefail
+          git diff --check
+          echo '---XLSXWRITER_PATCH_BEGIN---'
+          git diff --no-ext-diff -- src-tauri/Cargo.toml src-tauri/Cargo.lock
+          echo '---XLSXWRITER_PATCH_END---'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xlsxwriter0102-candidate
+          path: |
+            src-tauri/Cargo.toml
+            src-tauri/Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
+
+  xlsx-regression:
+    name: XLSX write-read-patch-reopen E2E and malformed-workbook smoke
+    needs: candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: xlsxwriter0102-candidate
+          path: src-tauri
+      - name: Linux Tauri prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: "ci-xlsxwriter-v0102"
+      - name: Stage required debug sidecar
+        run: node scripts/tauri/prepare-sidecars.cjs --profile debug
+      - name: Compile native app with XLSX writer migration
+        working-directory: src-tauri
+        run: cargo check --locked -p org2
+      - name: Execute XLSX read-save-reopen regression and invalid-input smoke
+        working-directory: src-tauri
+        run: cargo test --locked -p org2 --lib spreadsheet_xlsx
+
+  rustsec:
+    name: RustSec XLSX writer audit (fail closed)
+    needs: candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: xlsxwriter0102-candidate
+          path: src-tauri
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Keep remaining RustSec findings as failures
+        working-directory: src-tauri
+        run: cargo audit

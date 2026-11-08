@@ -1,6 +1,5 @@
-# Diagnostic trial only: reproduce compatible security updates without
-# modifying the checked-out PR HEAD, publishing or pushing from Actions.
-# A successful probe is NOT release approval; Cargo Audit stays fail-closed.
+# Diagnostic trial: Cargo regenerates a candidate locked dependency graph.
+# No job may push, sign, or publish. Audit failures MUST NOT be ignored.
 name: RustSec TLS and QUIC patch probe
 
 on:
@@ -15,17 +14,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  probe:
-    name: RustSec TLS/QUIC candidate (not release clearance)
+  cargo-lock-candidate:
+    name: Cargo-generated TLS/QUIC lockfile candidate
     runs-on: ubuntu-22.04
-    timeout-minutes: 100
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v6
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-      - name: Upgrade only five verified vulnerable locked crates
+      - name: Update only five verified vulnerable locked crates
         working-directory: src-tauri
+        shell: bash
         run: |
           set -euo pipefail
           cargo update -p quinn-proto@0.11.17 --precise 0.11.18
@@ -42,7 +42,28 @@ jobs:
           echo '---CARGO_LOCK_PATCH_BEGIN---'
           git diff --no-ext-diff -- src-tauri/Cargo.lock
           echo '---CARGO_LOCK_PATCH_END---'
-      - name: Install Linux Rust build dependencies
+      - name: Preserve candidate locked dependency graph
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustsec-candidate-cargo-lock
+          path: src-tauri/Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
+
+  linux-regression:
+    name: Linux Rust dependency smoke (candidate lockfile)
+    needs: cargo-lock-candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install Cargo-generated candidate lockfile
+        uses: actions/download-artifact@v4
+        with:
+          name: rustsec-candidate-cargo-lock
+          path: src-tauri
+      - name: Install Linux Rust build prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -51,6 +72,8 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
@@ -63,8 +86,24 @@ jobs:
       - name: Mobile Relay Rust smoke
         working-directory: src-tauri
         run: cargo test --locked -p mobile-relay-protocol --all-features
-      - name: Audit candidate lockfile (must fail if vulnerabilities remain)
+
+  security-audit:
+    name: RustSec audit (FAIL if vulnerabilities remain)
+    needs: cargo-lock-candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install Cargo-generated candidate lockfile
+        uses: actions/download-artifact@v4
+        with:
+          name: rustsec-candidate-cargo-lock
+          path: src-tauri
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit candidate lockfile without exceptions
         working-directory: src-tauri
-        run: |
-          cargo install cargo-audit --locked
-          cargo audit
+        run: cargo audit

@@ -1,6 +1,6 @@
 # Read-only RustSec dependency experiment based on Draft PR #32.
 # No job may push, sign or publish release artifacts.
-name: RustSec zstd-safe 7.x patch probe
+name: RustSec zstd-safe 7.x patch verification
 
 on:
   pull_request:
@@ -15,25 +15,29 @@ concurrency:
 
 jobs:
   resolve:
-    name: Generate zstd-safe 7.4.0 locked candidate
+    name: Verify committed zstd-safe 7.4.0 lockfile
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - name: Resolve patched compatible zstd-safe release
+      - name: Verify patched zstd-safe and zstd-sys in immutable Cargo.lock
         working-directory: src-tauri
         run: |
           set -euo pipefail
-          cargo update -p zstd-safe@7.2.4 --precise 7.4.0
-          cargo metadata --locked --format-version 1 > /dev/null
-      - name: Print exact Cargo-generated dependency changes
-        run: |
-          set -euo pipefail
-          git diff --check
-          echo '---ZSTD_LOCK_PATCH_BEGIN---'
-          git diff --no-ext-diff -- src-tauri/Cargo.lock
-          echo '---ZSTD_LOCK_PATCH_END---'
+          cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/zstd-metadata.json"
+          python3 - <<'PY'
+          import json, os
+          with open(os.environ["RUNNER_TEMP"] + "/zstd-metadata.json", encoding="utf-8") as f:
+              packages = json.load(f)["packages"]
+          expected = {"zstd-safe": "7.4.0", "zstd-sys": "2.1.2+zstd.1.5.7"}
+          for name, version in expected.items():
+              found = {p["version"] for p in packages if p["name"] == name}
+              assert found == {version}, f"Expected {name} {version}, got {found}"
+          print("Verified patched compression dependencies.")
+          PY
+      - name: Reject any lockfile churn
+        run: git diff --exit-code -- src-tauri/Cargo.lock
       - uses: actions/upload-artifact@v4
         with:
           name: zstd-safe7-candidate-lock
@@ -74,7 +78,7 @@ jobs:
         run: cargo test --locked -p lsp --lib
 
   audit:
-    name: RustSec audit (fail on outstanding vulnerabilities)
+    name: RustSec audit (fail on remaining vulnerabilities)
     needs: resolve
     runs-on: ubuntu-22.04
     timeout-minutes: 30

@@ -1,6 +1,6 @@
 # Read-only experiment: keep Tauri 2.11 / Rust 1.89 and disable the
 # optional Tauri-v1 ZIP updater compatibility feature only. Never publish.
-name: RustSec updater legacy ZIP feature probe
+name: RustSec updater legacy ZIP feature verification
 
 on:
   pull_request:
@@ -15,44 +15,31 @@ concurrency:
 
 jobs:
   resolve:
-    name: Prove updater can exclude ZIP 4.x
+    name: Verify updater excludes legacy ZIP 4.x
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - name: Disable only optional legacy ZIP updater feature
+      - name: Verify committed updater settings and immutable Cargo.lock
         working-directory: src-tauri
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("Cargo.toml")
-          value = p.read_text()
-          old = 'tauri-plugin-updater = "=2.9.0"'
-          new = 'tauri-plugin-updater = { version = "=2.9.0", default-features = false, features = ["rustls-tls"] }'
-          # Both the root and desktop-target dependencies must disable this
-          # feature: Cargo unifies defaults/features across duplicate entries.
-          assert value.count(old) == 2, "updater dependency declarations changed"
-          p.write_text(value.replace(old, new))
-          PY
-          cargo update -p tauri-plugin-updater@2.9.0 --precise 2.9.0
           cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/updater-metadata.json"
           python3 - <<'PY'
           import json, os
+          from pathlib import Path
+          value = Path("Cargo.toml").read_text()
+          updater = 'tauri-plugin-updater = { version = "=2.9.0", default-features = false, features = ["rustls-tls"] }'
+          assert value.count(updater) == 2, "Both updater declarations must disable legacy ZIP"
           with open(os.environ["RUNNER_TEMP"] + "/updater-metadata.json", encoding="utf-8") as f:
               packages = json.load(f)["packages"]
           zips = sorted({p["version"] for p in packages if p["name"] == "zip"})
-          print(f"ZIP versions after updater feature change: {zips}")
-          assert "4.6.1" not in zips, "Legacy updater ZIP 4.x still present; investigate other feature owners"
+          print("ZIP versions on committed lockfile:", zips)
+          assert "4.6.1" not in zips, "Legacy ZIP 4.x is still present"
           PY
-      - name: Print exact manifest and Cargo.lock patch
-        run: |
-          set -euo pipefail
-          git diff --check
-          echo '---UPDATER_ZIP_PATCH_BEGIN---'
-          git diff --no-ext-diff -- src-tauri/Cargo.toml src-tauri/Cargo.lock
-          echo '---UPDATER_ZIP_PATCH_END---'
+      - name: Reject manifest and lockfile churn
+        run: git diff --exit-code -- src-tauri/Cargo.toml src-tauri/Cargo.lock
       - uses: actions/upload-artifact@v4
         with:
           name: updater-legacy-zip-disabled-candidate

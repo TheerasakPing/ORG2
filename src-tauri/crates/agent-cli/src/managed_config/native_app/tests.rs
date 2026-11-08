@@ -694,6 +694,10 @@ fn legacy_active_and_reverse_cli_switch_require_restore_without_touching_primary
         .unwrap()
         .contains("model_provider"));
 }
+// Claude Desktop native integration is implemented for macOS and Windows only.
+// Keep the regression on supported targets; Linux must not poison the shared
+// managed-config test mutex by asserting success on an unsupported platform.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[test]
 fn claude_helper_runtime_and_restore_stay_isolated_and_preserve_runtime_preferences() {
     let _lock = TEST_ENV_LOCK.get_or_init(Default::default).lock().unwrap();

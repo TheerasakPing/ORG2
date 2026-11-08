@@ -49,10 +49,9 @@ jobs:
           cargo update -p webpki-roots@1.0.7 --precise 1.0.10
           cargo update -p webpki-root-certs@1.0.7 --precise 1.0.10
           cargo update -p libz-sys@1.1.29 --precise 1.1.31
-          cargo update -p calamine@0.35.0 --precise 0.38.0
-          cargo update -p rust_xlsxwriter@0.95.0 --precise 0.102.0
-          cargo update -p zip@2.4.2 --precise 9.4.2
-          cargo update -p tauri-plugin-updater@2.9.0 --precise 2.9.0
+          # The manifest was updated above. Cargo already re-resolved these
+          # three crates during the first update, so their OLD package IDs
+          # no longer exist. Confirm their selected versions via metadata.
           cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/unified-metadata.json"
           python3 - <<'PY'
           import json, os

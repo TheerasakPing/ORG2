@@ -1,0 +1,105 @@
+# Read-only security probe for untrusted XLS/XLSB/CFB parsing.
+# Actual Cargo.toml and Cargo.lock updates are produced on CI only until reviewed.
+name: RustSec calamine 0.38 upgrade verification
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rustsec-calamine-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  candidate:
+    name: Verify committed calamine 0.38 and Cargo.lock
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify patched calamine and locked dependency versions
+        working-directory: src-tauri
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/calamine-metadata.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          with open(os.environ["RUNNER_TEMP"] + "/calamine-metadata.json", encoding="utf-8") as f:
+              packages = json.load(f)["packages"]
+          expected = {("calamine", "0.38.0"), ("zip", "9.4.1")}
+          found = {(p["name"], p["version"]) for p in packages}
+          missing = expected - found
+          assert not missing, f"Patched workbook dependency missing: {missing}"
+          assert 'calamine = "0.38.0"' in Path("Cargo.toml").read_text()
+          print("Verified committed calamine and ZIP 9 dependency versions.")
+          PY
+      - name: Reject manifest/lockfile churn
+        run: git diff --exit-code -- src-tauri/Cargo.toml src-tauri/Cargo.lock
+      - uses: actions/upload-artifact@v4
+        with:
+          name: calamine038-reviewed-candidate
+          path: |
+            src-tauri/Cargo.toml
+            src-tauri/Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
+
+  xlsx-regression:
+    name: Spreadsheet real XLSX E2E and malformed-file smoke
+    needs: candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: calamine038-reviewed-candidate
+          path: src-tauri
+      - name: Install Linux Tauri dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: "ci-calamine-probe"
+      - name: Stage app sidecar before Rust app checks
+        run: node scripts/tauri/prepare-sidecars.cjs --profile debug
+      - name: Rust app check against candidate manifest and immutable lock
+        working-directory: src-tauri
+        run: cargo check --locked -p org2
+      - name: Run spreadsheet Rust unit, roundtrip and malformed-file smoke
+        working-directory: src-tauri
+        run: cargo test --locked -p org2 --lib spreadsheet_xlsx
+
+  security-audit:
+    name: Cargo Audit (must fail if other advisories remain)
+    needs: candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: calamine038-reviewed-candidate
+          path: src-tauri
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit current candidate dependency tree
+        working-directory: src-tauri
+        run: cargo audit

@@ -1,6 +1,6 @@
 # Read-only RustSec diagnostic, stacked on the reviewed TLS/QUIC patch branch.
-# Generated Cargo.lock is an artifact, not a production change.
-name: RustSec libz-sys remediation probe
+# Validate a committed Cargo-generated lockfile; no production signing/publishing.
+name: RustSec libz-sys patch verification
 
 on:
   pull_request:
@@ -15,26 +15,28 @@ concurrency:
 
 jobs:
   resolve:
-    name: Generate patched libz-sys Cargo.lock
+    name: Verify committed patched libz-sys Cargo.lock
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - name: Update only libz-sys to fixed advisory version
+      - name: Verify patched libz-sys in immutable Cargo.lock
         working-directory: src-tauri
         run: |
           set -euo pipefail
-          cargo update -p libz-sys@1.1.29 --precise 1.1.31
-          cargo metadata --locked --format-version 1 > /dev/null
-      - name: Review Cargo-generated lock diff
-        run: |
-          set -euo pipefail
-          git diff --check
-          echo '---LIBZ_LOCK_PATCH_BEGIN---'
-          git diff --no-ext-diff -- src-tauri/Cargo.lock
-          echo '---LIBZ_LOCK_PATCH_END---'
-      - name: Upload candidate lockfile for repeatable tests
+          cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/libz-metadata.json"
+          python3 - <<'PY'
+          import json, os
+          with open(os.environ["RUNNER_TEMP"] + "/libz-metadata.json", encoding="utf-8") as f:
+              deps = json.load(f)["packages"]
+          versions = {p["version"] for p in deps if p["name"] == "libz-sys"}
+          assert versions == {"1.1.31"}, f"unexpected libz-sys versions: {versions}"
+          print("Verified patched libz-sys 1.1.31")
+          PY
+      - name: Reject unexpected Cargo.lock changes
+        run: git diff --exit-code -- src-tauri/Cargo.lock
+      - name: Upload exact committed lockfile for repeatable tests
         uses: actions/upload-artifact@v4
         with:
           name: libz-patched-cargo-lock
@@ -80,7 +82,7 @@ jobs:
         run: cargo test --locked -p git --lib
 
   audit:
-    name: RustSec libz candidate audit (must fail on remaining CVEs)
+    name: RustSec libz audit (must fail on remaining CVEs)
     needs: resolve
     runs-on: ubuntu-22.04
     timeout-minutes: 20

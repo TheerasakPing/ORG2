@@ -1,6 +1,6 @@
 # Read-only experiment: remove remaining vulnerable ZIP7 XLSX writer dependency.
 # Compatibility is gated by real XLSX round-trip tests in PR #34.
-name: RustSec XLSX writer ZIP9 dependency probe
+name: RustSec XLSX writer ZIP9 dependency verification
 
 on:
   pull_request:
@@ -15,43 +15,31 @@ concurrency:
 
 jobs:
   candidate:
-    name: Resolve XLSX writer 0.102 and Cargo.lock
+    name: Verify committed XLSX writer 0.102 and Cargo.lock
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - name: Upgrade XLSX writer using Cargo dependency resolver
+      - name: Verify committed XLSX writer dependency and immutable lock
         working-directory: src-tauri
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("Cargo.toml")
-          value = p.read_text()
-          old = 'rust_xlsxwriter = "0.95.0"'
-          assert value.count(old) == 1, "unexpected rust_xlsxwriter manifest requirement"
-          p.write_text(value.replace(old, 'rust_xlsxwriter = "0.102.0"'))
-          PY
-          cargo update -p rust_xlsxwriter@0.95.0 --precise 0.102.0
           cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/xlsx-metadata.json"
           python3 - <<'PY'
           import json, os
+          from pathlib import Path
           with open(os.environ["RUNNER_TEMP"] + "/xlsx-metadata.json", encoding="utf-8") as f:
-              packages = json.load(f)["packages"]
-          found = {(p["name"], p["version"]) for p in packages}
+              ps = json.load(f)["packages"]
+          found = {(p["name"], p["version"]) for p in ps}
           assert ("rust_xlsxwriter", "0.102.0") in found
-          zips = sorted({p["version"] for p in packages if p["name"] == "zip"})
-          print("Resolved ZIP versions:", zips)
-          assert "7.2.0" not in zips, "ZIP 7.2.0 remains from another dependency owner"
+          zips = sorted({p["version"] for p in ps if p["name"] == "zip"})
+          assert "7.2.0" not in zips, f"Legacy XLSX ZIP7 remains: {zips}"
+          assert 'rust_xlsxwriter = "0.102.0"' in Path("Cargo.toml").read_text()
+          print(f"Verified committed XLSX writer and ZIP versions: {zips}")
           PY
-      - name: Show Cargo-generated manifest and lockfile patch
-        run: |
-          set -euo pipefail
-          git diff --check
-          echo '---XLSXWRITER_PATCH_BEGIN---'
-          git diff --no-ext-diff -- src-tauri/Cargo.toml src-tauri/Cargo.lock
-          echo '---XLSXWRITER_PATCH_END---'
+      - name: Reject lockfile or manifest churn
+        run: git diff --exit-code -- src-tauri/Cargo.toml src-tauri/Cargo.lock
       - uses: actions/upload-artifact@v4
         with:
           name: xlsxwriter0102-candidate

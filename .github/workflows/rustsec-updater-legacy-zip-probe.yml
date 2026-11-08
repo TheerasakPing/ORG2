@@ -31,7 +31,9 @@ jobs:
           value = p.read_text()
           old = 'tauri-plugin-updater = "=2.9.0"'
           new = 'tauri-plugin-updater = { version = "=2.9.0", default-features = false, features = ["rustls-tls"] }'
-          assert value.count(old) == 1, "updater version requirement changed"
+          # Both the root and desktop-target dependencies must disable this
+          # feature: Cargo unifies defaults/features across duplicate entries.
+          assert value.count(old) == 2, "updater dependency declarations changed"
           p.write_text(value.replace(old, new))
           PY
           cargo update -p tauri-plugin-updater@2.9.0 --precise 2.9.0

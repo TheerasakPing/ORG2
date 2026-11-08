@@ -1,0 +1,70 @@
+# Diagnostic trial only: reproduce compatible security updates without
+# modifying the checked-out PR HEAD, publishing or pushing from Actions.
+# A successful probe is NOT release approval; Cargo Audit stays fail-closed.
+name: RustSec TLS and QUIC patch probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rustsec-tls-trial-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: RustSec TLS/QUIC candidate (not release clearance)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 100
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Upgrade only five verified vulnerable locked crates
+        working-directory: src-tauri
+        run: |
+          set -euo pipefail
+          cargo update -p quinn-proto@0.11.17 --precise 0.11.18
+          cargo update -p rustls@0.23.45 --precise 0.23.46
+          cargo update -p rustls-webpki@0.103.15 --precise 0.103.16
+          cargo update -p webpki-roots@1.0.7 --precise 1.0.10
+          cargo update -p webpki-root-certs@1.0.7 --precise 1.0.10
+          cargo metadata --locked --format-version 1 > /dev/null
+      - name: Emit Cargo-generated patch for independent inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          echo '---CARGO_LOCK_PATCH_BEGIN---'
+          git diff --no-ext-diff -- src-tauri/Cargo.lock
+          echo '---CARGO_LOCK_PATCH_END---'
+      - name: Install Linux Rust build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: "ci-linux-security-probe"
+          cache-on-failure: true
+      - name: Check Rust crates affected by network/security dependencies
+        working-directory: src-tauri
+        run: cargo check --locked -p integrations -p market-connect -p git
+      - name: Mobile Relay Rust smoke
+        working-directory: src-tauri
+        run: cargo test --locked -p mobile-relay-protocol --all-features
+      - name: Audit candidate lockfile (must fail if vulnerabilities remain)
+        working-directory: src-tauri
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit

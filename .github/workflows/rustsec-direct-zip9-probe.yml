@@ -1,0 +1,143 @@
+# Read-only proof-of-compatibility for the vulnerable direct ZIP 2.x dependency.
+# Does not change the Tauri updater's transitive ZIP 4.x dependency.
+name: RustSec direct ZIP 9 migration probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rustsec-direct-zip-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  candidate:
+    name: Resolve direct ZIP 9.4.2 with LSP API migration
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Rewrite direct ZIP version and use Cargo's resolver
+        working-directory: src-tauri
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("Cargo.toml")
+          text = p.read_text()
+          old = 'zip = "2"                # ZIP compression'
+          assert text.count(old) == 1, "direct ZIP manifest anchor changed"
+          p.write_text(text.replace(old, 'zip = "9.4.1"            # ZIP compression'))
+          PY
+          cargo update -p zip@2.4.2 --precise 9.4.2
+          cargo metadata --locked --format-version 1 > /dev/null
+      - name: Adapt LSP ZIP entry name API (Result in ZIP 9)
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src-tauri/crates/lsp/src/install_pipeline.rs")
+          content = p.read_text()
+          before = '        let name = file.name().to_string();'
+          after = chr(10).join([
+              "        let name = file.name()",
+              "            .map_err(|err| InstallError::DownloadFailed(",
+              '                format!("Failed to parse ZIP entry name: {err}")',
+              "            ))?",
+              "            .into_owned();",
+          ])
+          assert content.count(before) == 1, "LSP ZIP API adapter anchor changed"
+          p.write_text(content.replace(before, after))
+          PY
+      - name: Adapt agent-core AI Researcher ZIP entry name API
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src-tauri/crates/agent-core/src/specialization/skills/loader/source_dirs.rs")
+          text = p.read_text()
+          old = '        let name = file.name().to_string();'
+          new = chr(10).join([
+              "        let name = file.name()",
+              '            .map_err(|err| format!("Invalid AI Researcher ZIP entry name: {err}"))?',
+              "            .into_owned();",
+          ])
+          assert text.count(old) == 1, "agent-core ZIP API adapter anchor changed"
+          p.write_text(text.replace(old, new))
+          PY
+      - name: Emit manifest and lock diff for review
+        run: |
+          set -euo pipefail
+          git diff --check
+          echo '---ZIP9_PATCH_BEGIN---'
+          git diff --no-ext-diff -- src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/crates/lsp/src/install_pipeline.rs src-tauri/crates/agent-core/src/specialization/skills/loader/source_dirs.rs
+          echo '---ZIP9_PATCH_END---'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: direct-zip9-checked-candidate
+          path: |
+            src-tauri/Cargo.toml
+            src-tauri/Cargo.lock
+            src-tauri/crates/lsp/src/install_pipeline.rs
+            src-tauri/crates/agent-core/src/specialization/skills/loader/source_dirs.rs
+          if-no-files-found: error
+          retention-days: 7
+
+  lsp-regression:
+    name: ZIP extraction path confinement and Rust compile smoke
+    needs: candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: direct-zip9-checked-candidate
+          path: src-tauri
+      - name: Install Linux Rust app prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: "ci-zip9-compat"
+      - name: Stage app sidecar
+        run: node scripts/tauri/prepare-sidecars.cjs --profile debug
+      - name: Check all direct ZIP Rust consumers
+        working-directory: src-tauri
+        run: cargo check --locked -p lsp -p agent_core -p org2
+      - name: Test ZIP path confinement, corrupt archives, and extraction compatibility
+        working-directory: src-tauri
+        run: cargo test --locked -p lsp --lib test_zip_installer
+
+  security-audit:
+    name: RustSec audit (FAIL until all other CVEs are fixed)
+    needs: candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: direct-zip9-checked-candidate
+          path: src-tauri
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit candidate locked dependencies without exceptions
+        working-directory: src-tauri
+        run: cargo audit

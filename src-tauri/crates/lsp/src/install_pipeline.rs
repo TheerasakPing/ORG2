@@ -674,4 +674,40 @@ mod tests {
         assert!(not_found.to_string().contains("npm"));
         assert!(manual.to_string().contains("rust-analyzer"));
     }
+
+    /// A downloaded ZIP can contain path-traversal entry names. ORG2 must
+    /// always write the selected binary to its fixed, trusted destination.
+    /// This is a path-confinement smoke test, not a complete ZIP-bomb test.
+    #[test]
+    fn test_zip_installer_uses_fixed_destination_for_untrusted_entry_name() {
+        use std::io::{Cursor, Write};
+        use zip::write::SimpleFileOptions;
+
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file(
+                "../../outside/rust-analyzer",
+                SimpleFileOptions::default(),
+            )
+            .unwrap();
+        writer.write_all(b"trusted-fixture-bytes").unwrap();
+        let data = writer.finish().unwrap().into_inner();
+
+        let temp = tempfile::tempdir().unwrap();
+        extract_zip(&data, temp.path(), "rust-analyzer").unwrap();
+
+        assert_eq!(
+            std::fs::read(temp.path().join("rust-analyzer")).unwrap(),
+            b"trusted-fixture-bytes"
+        );
+        assert!(!temp.path().parent().unwrap().join("outside").exists());
+    }
+
+    #[test]
+    fn test_zip_installer_rejects_invalid_archive_without_writing_binary() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(extract_zip(b"not-a-zip", temp.path(), "rust-analyzer").is_err());
+        assert!(!temp.path().join("rust-analyzer").exists());
+    }
+
 }

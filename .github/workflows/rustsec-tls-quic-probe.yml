@@ -1,6 +1,6 @@
 # Diagnostic trial: Cargo regenerates a candidate locked dependency graph.
 # No job may push, sign, or publish. Audit failures MUST NOT be ignored.
-name: RustSec TLS and QUIC patch probe
+name: RustSec TLS and QUIC patch verification
 
 on:
   pull_request:
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   cargo-lock-candidate:
-    name: Cargo-generated TLS/QUIC lockfile candidate
+    name: Verified TLS/QUIC Cargo.lock dependency set
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     steps:
@@ -23,25 +23,30 @@ jobs:
         uses: actions/checkout@v6
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-      - name: Update only five verified vulnerable locked crates
+      - name: Verify all five patched crate versions on immutable workspace lock
         working-directory: src-tauri
         shell: bash
         run: |
           set -euo pipefail
-          cargo update -p quinn-proto@0.11.17 --precise 0.11.18
-          cargo update -p rustls@0.23.45 --precise 0.23.46
-          cargo update -p rustls-webpki@0.103.15 --precise 0.103.16
-          cargo update -p webpki-roots@1.0.7 --precise 1.0.10
-          cargo update -p webpki-root-certs@1.0.7 --precise 1.0.10
-          cargo metadata --locked --format-version 1 > /dev/null
-      - name: Emit Cargo-generated patch for independent inspection
-        shell: bash
-        run: |
-          set -euo pipefail
-          git diff --check
-          echo '---CARGO_LOCK_PATCH_BEGIN---'
-          git diff --no-ext-diff -- src-tauri/Cargo.lock
-          echo '---CARGO_LOCK_PATCH_END---'
+          cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/rustsec-metadata.json"
+          python3 - <<'PY'
+          import json, os
+          with open(os.environ["RUNNER_TEMP"] + "/rustsec-metadata.json", encoding="utf-8") as f:
+              packages = json.load(f)["packages"]
+          versions = {(p["name"], p["version"]) for p in packages}
+          targets = {
+              ("quinn-proto", "0.11.18"),
+              ("rustls", "0.23.46"),
+              ("rustls-webpki", "0.103.16"),
+              ("webpki-roots", "1.0.10"),
+              ("webpki-root-certs", "1.0.10"),
+          }
+          missing = targets - versions
+          assert not missing, f"Patched dependencies missing from locked workspace: {missing}"
+          print("Verified five patched Cargo.lock dependency versions.")
+          PY
+      - name: Reject lockfile churn
+        run: git diff --exit-code -- src-tauri/Cargo.lock
       - name: Preserve candidate locked dependency graph
         uses: actions/upload-artifact@v4
         with:

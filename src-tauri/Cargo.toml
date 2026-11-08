@@ -509,7 +509,7 @@ rand = { workspace = true }   # CSPRNG for OAuth PKCE (state + code_verifier)
 tokio-util = { workspace = true }  # CancellationToken (in default surface) for rmcp serve_with_ct + wingman
 csv = "1.4.0"
 calamine = "0.38.0"
-rust_xlsxwriter = "0.95.0"
+rust_xlsxwriter = "0.102.0"
 
 # ===========================================
 # Unix-only dependencies

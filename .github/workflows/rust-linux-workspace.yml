@@ -49,6 +49,11 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "20"
+      - name: Configure Git identity for disposable fixture repositories
+        run: |
+          git config --global user.name "ORG2 CI Fixture"
+          git config --global user.email "org2-ci@tests.invalid"
+          git config --global commit.gpgsign false
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:

@@ -1,0 +1,92 @@
+# Read-only RustSec dependency experiment based on Draft PR #32.
+# No job may push, sign or publish release artifacts.
+name: RustSec zstd-safe 7.x patch probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rustsec-zstd-safe-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    name: Generate zstd-safe 7.4.0 locked candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Resolve patched compatible zstd-safe release
+        working-directory: src-tauri
+        run: |
+          set -euo pipefail
+          cargo update -p zstd-safe@7.2.4 --precise 7.4.0
+          cargo metadata --locked --format-version 1 > /dev/null
+      - name: Print exact Cargo-generated dependency changes
+        run: |
+          set -euo pipefail
+          git diff --check
+          echo '---ZSTD_LOCK_PATCH_BEGIN---'
+          git diff --no-ext-diff -- src-tauri/Cargo.lock
+          echo '---ZSTD_LOCK_PATCH_END---'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zstd-safe7-candidate-lock
+          path: src-tauri/Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
+
+  compression-smoke:
+    name: Compression consumer Rust smoke
+    needs: resolve
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: zstd-safe7-candidate-lock
+          path: src-tauri
+      - name: Install Linux Rust/Tauri prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: "rustsec-zstd-safe-7"
+      - name: Check compression consumers without changing lockfile
+        working-directory: src-tauri
+        run: cargo check --locked -p lsp -p agent_core
+      - name: LSP Rust regression smoke
+        working-directory: src-tauri
+        run: cargo test --locked -p lsp --lib
+
+  audit:
+    name: RustSec audit (fail on outstanding vulnerabilities)
+    needs: resolve
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: zstd-safe7-candidate-lock
+          path: src-tauri
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Fail on remaining advisories
+        working-directory: src-tauri
+        run: cargo audit

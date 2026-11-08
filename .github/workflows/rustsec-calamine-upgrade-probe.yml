@@ -1,6 +1,6 @@
 # Read-only security probe for untrusted XLS/XLSB/CFB parsing.
 # Actual Cargo.toml and Cargo.lock updates are produced on CI only until reviewed.
-name: RustSec calamine 0.38 upgrade probe
+name: RustSec calamine 0.38 upgrade verification
 
 on:
   pull_request:
@@ -15,34 +15,31 @@ concurrency:
 
 jobs:
   candidate:
-    name: Resolve calamine 0.38 and lockfile without waiver
+    name: Verify committed calamine 0.38 and Cargo.lock
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - name: Update manifest and Cargo-generated lockfile
+      - name: Verify patched calamine and locked dependency versions
         working-directory: src-tauri
-        shell: bash
         run: |
           set -euo pipefail
+          cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/calamine-metadata.json"
           python3 - <<'PY'
+          import json, os
           from pathlib import Path
-          p = Path("Cargo.toml")
-          contents = p.read_text()
-          old = 'calamine = "0.35.0"'
-          assert contents.count(old) == 1, "calamine direct requirement changed unexpectedly"
-          p.write_text(contents.replace(old, 'calamine = "0.38.0"'))
+          with open(os.environ["RUNNER_TEMP"] + "/calamine-metadata.json", encoding="utf-8") as f:
+              packages = json.load(f)["packages"]
+          expected = {("calamine", "0.38.0"), ("zip", "9.4.1")}
+          found = {(p["name"], p["version"]) for p in packages}
+          missing = expected - found
+          assert not missing, f"Patched workbook dependency missing: {missing}"
+          assert 'calamine = "0.38.0"' in Path("Cargo.toml").read_text()
+          print("Verified committed calamine and ZIP 9 dependency versions.")
           PY
-          cargo update -p calamine@0.35.0 --precise 0.38.0
-          cargo metadata --locked --format-version 1 > /dev/null
-      - name: Print reviewed candidate diffs
-        run: |
-          set -euo pipefail
-          git diff --check
-          echo '---CALAMINE_PATCH_BEGIN---'
-          git diff --no-ext-diff -- src-tauri/Cargo.toml src-tauri/Cargo.lock
-          echo '---CALAMINE_PATCH_END---'
+      - name: Reject manifest/lockfile churn
+        run: git diff --exit-code -- src-tauri/Cargo.toml src-tauri/Cargo.lock
       - uses: actions/upload-artifact@v4
         with:
           name: calamine038-reviewed-candidate

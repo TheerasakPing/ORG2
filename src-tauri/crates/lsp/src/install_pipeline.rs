@@ -440,7 +440,11 @@ fn extract_zip(data: &[u8], dest_dir: &Path, binary_name: &str) -> Result<(), In
             InstallError::DownloadFailed(format!("Failed to read zip entry: {}", e))
         })?;
 
-        let name = file.name().to_string();
+        let name = file.name()
+            .map_err(|err| InstallError::DownloadFailed(
+                format!("Failed to parse ZIP entry name: {err}")
+            ))?
+            .into_owned();
 
         // Look for the binary (might be in a subdirectory)
         if name.ends_with(binary_name) || name.ends_with(&format!("{}.exe", binary_name)) {
@@ -674,4 +678,39 @@ mod tests {
         assert!(not_found.to_string().contains("npm"));
         assert!(manual.to_string().contains("rust-analyzer"));
     }
+
+    /// A downloaded ZIP can contain path-traversal entry names. ORG2 must
+    /// always write the selected binary to its fixed, trusted destination.
+    /// This is a path-confinement smoke test, not a complete ZIP-bomb test.
+    #[test]
+    fn test_zip_installer_uses_fixed_destination_for_untrusted_entry_name() {
+        use std::io::{Cursor, Write};
+        use zip::write::SimpleFileOptions;
+
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file("../outside/rust-analyzer", SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"trusted-fixture-bytes").unwrap();
+        let data = writer.finish().unwrap().into_inner();
+
+        let temp = tempfile::tempdir().unwrap();
+        let bin_dir = temp.path().join("bin");
+        std::fs::create_dir(&bin_dir).unwrap();
+        extract_zip(&data, &bin_dir, "rust-analyzer").unwrap();
+
+        assert_eq!(
+            std::fs::read(bin_dir.join("rust-analyzer")).unwrap(),
+            b"trusted-fixture-bytes"
+        );
+        assert!(!temp.path().join("outside").exists());
+    }
+
+    #[test]
+    fn test_zip_installer_rejects_invalid_archive_without_writing_binary() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(extract_zip(b"not-a-zip", temp.path(), "rust-analyzer").is_err());
+        assert!(!temp.path().join("rust-analyzer").exists());
+    }
+
 }

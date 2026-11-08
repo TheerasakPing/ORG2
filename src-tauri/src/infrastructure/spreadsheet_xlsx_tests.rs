@@ -80,3 +80,55 @@ fn apply_sheet_patches_expands_sparse_rows_and_columns() {
         vec!["".to_string(), "".to_string(), "c".to_string()]
     );
 }
+
+
+/// Full reader/writer regression for calamine upgrades: real XLSX bytes must
+/// survive an ORG2 read -> save-patches -> reopen cycle.
+#[test]
+fn workbook_round_trip_reopens_and_persists_cell_patch() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("spreadsheet-roundtrip.xlsx");
+    let mut workbook = Workbook::new();
+    workbook
+        .add_worksheet()
+        .write_string(0, 0, "original")
+        .unwrap();
+    workbook.save(&path).unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+
+    let info = workbook_info(&path_str).unwrap();
+    assert_eq!(info.sheets.len(), 1);
+    let sheet_name = info.sheets[0].name.clone();
+
+    let request = XlsxPageRequest {
+        path: path_str.clone(),
+        sheet_name: sheet_name.clone(),
+        start_row: 0,
+        page_size: 1,
+    };
+    assert_eq!(read_xlsx_page(&request).unwrap().rows[0][0], "original");
+
+    save_xlsx_patches(&XlsxSavePatchesRequest {
+        path: path_str,
+        patches: vec![XlsxCellPatch {
+            sheet_name,
+            row_index: 0,
+            column_index: 0,
+            value: "patched".to_owned(),
+        }],
+    })
+    .unwrap();
+
+    assert_eq!(read_xlsx_page(&request).unwrap().rows[0][0], "patched");
+}
+
+/// A corrupt workbook is untrusted input; parsing must return an error instead
+/// of crashing the process. This is a sanity regression, not a full CFB/OLE
+/// exploit fixture or a claim that the upstream advisory has been eliminated.
+#[test]
+fn malformed_xls_returns_error_instead_of_panicking() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("malformed.xls");
+    std::fs::write(&path, b"corrupt OLE2 workbook fixture").unwrap();
+    assert!(workbook_info(&path.to_string_lossy()).is_err());
+}

@@ -1,6 +1,6 @@
-# Disposable integration trial — no Git pushes, signatures, secret reads, or releases.
-# Compare combined dependency graph rather than trusting isolated child PR scans.
-name: Unified RustSec remediation integration candidate
+# Read-only full-workspace verification of committed RustSec remediation.
+# Do not sign, publish or weaken audit checks.
+name: Unified RustSec remediation verification
 
 on:
   pull_request:
@@ -15,50 +15,24 @@ concurrency:
 
 jobs:
   resolve:
-    name: Resolve and preserve combined Cargo manifest/lock and test sources
+    name: Verify committed Cargo.lock and patched source set
     runs-on: ubuntu-22.04
-    timeout-minutes: 40
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - name: Apply compatible direct manifest changes (no ignored advisories)
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("src-tauri/Cargo.toml")
-          source = p.read_text()
-          replacements = [
-              ('zip = "2"                # ZIP compression', 'zip = "9.4.2"            # ZIP compression', 1),
-              ('calamine = "0.35.0"', 'calamine = "0.38.0"', 1),
-              ('rust_xlsxwriter = "0.95.0"', 'rust_xlsxwriter = "0.102.0"', 1),
-              ('tauri-plugin-updater = "=2.9.0"', 'tauri-plugin-updater = { version = "=2.9.0", default-features = false, features = ["rustls-tls"] }', 2),
-          ]
-          for old, new, count in replacements:
-              assert source.count(old) == count, f"Expected {count} manifest anchors for {old!r}"
-              source = source.replace(old, new)
-          p.write_text(source)
-          PY
-      - name: Resolve pinned TLS, compression, workbook and updater dependencies
+      - name: Check committed immutable Cargo metadata and source adapters
         working-directory: src-tauri
         run: |
           set -euo pipefail
-          cargo update -p quinn-proto@0.11.17 --precise 0.11.18
-          cargo update -p rustls@0.23.45 --precise 0.23.46
-          cargo update -p rustls-webpki@0.103.15 --precise 0.103.16
-          cargo update -p webpki-roots@1.0.7 --precise 1.0.10
-          cargo update -p webpki-root-certs@1.0.7 --precise 1.0.10
-          cargo update -p libz-sys@1.1.29 --precise 1.1.31
-          # The manifest was updated above. Cargo already re-resolved these
-          # three crates during the first update, so their OLD package IDs
-          # no longer exist. Confirm their selected versions via metadata.
           cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/unified-metadata.json"
           python3 - <<'PY'
           import json, os
+          from pathlib import Path
           with open(os.environ["RUNNER_TEMP"] + "/unified-metadata.json", encoding="utf-8") as f:
               ps = json.load(f)["packages"]
           found = {(p["name"], p["version"]) for p in ps}
-          must = {
+          required = {
               ("quinn-proto", "0.11.18"),
               ("rustls", "0.23.46"),
               ("rustls-webpki", "0.103.16"),
@@ -67,63 +41,27 @@ jobs:
               ("libz-sys", "1.1.31"),
               ("calamine", "0.38.0"),
               ("rust_xlsxwriter", "0.102.0"),
+              ("zip", "9.4.2"),
           }
-          assert not (must - found), f"Missing expected patched package: {must - found}"
+          assert not (required - found), f"Patched dependencies missing: {required - found}"
           zips = sorted({p["version"] for p in ps if p["name"] == "zip"})
-          print("Unified ZIP dependency versions:", zips)
-          assert all(v.startswith("9.") for v in zips), "Older ZIP major persists; do not merge"
+          assert zips == ["9.4.2"], f"Legacy ZIP still resolved: {zips}"
+          manifest = Path("Cargo.toml").read_text()
+          updater = 'tauri-plugin-updater = { version = "=2.9.0", default-features = false, features = ["rustls-tls"] }'
+          assert manifest.count(updater) == 2, "Legacy updater ZIP feature must be disabled for both targets"
+          assert 'calamine = "0.38.0"' in manifest
+          assert 'rust_xlsxwriter = "0.102.0"' in manifest
+          assert "Invalid AI Researcher ZIP entry name" in Path("crates/agent-core/src/specialization/skills/loader/source_dirs.rs").read_text()
+          assert "Failed to parse ZIP entry name" in Path("crates/lsp/src/install_pipeline.rs").read_text()
+          assert "workbook_round_trip_reopens_and_persists_cell_patch" in Path("src/infrastructure/spreadsheet_xlsx_tests.rs").read_text()
+          print("Verified committed Cargo.lock and security adapters.")
           PY
-      - name: Stage tested workbook/LSP test sources and ZIP 9 compatibility adapter
+      - name: Refuse unexpected dependency/source modifications
         run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin \
-            f174a6ec95eeacd7671ecea2c06be61324b98c38 \
-            387556af500ab0a4daac302d6f1f101e654ff42f
-          git show f174a6ec95eeacd7671ecea2c06be61324b98c38:src-tauri/src/infrastructure/spreadsheet_xlsx_tests.rs > src-tauri/src/infrastructure/spreadsheet_xlsx_tests.rs
-          git show 387556af500ab0a4daac302d6f1f101e654ff42f:src-tauri/crates/lsp/src/install_pipeline.rs > src-tauri/crates/lsp/src/install_pipeline.rs
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("src-tauri/crates/lsp/src/install_pipeline.rs")
-          src = p.read_text()
-          old = '        let name = file.name().to_string();'
-          new = chr(10).join([
-              "        let name = file.name()",
-              "            .map_err(|err| InstallError::DownloadFailed(",
-              '                format!("Failed to parse ZIP entry name: {err}")',
-              "            ))?",
-              "            .into_owned();",
-          ])
-          assert src.count(old) == 1, "ZIP 9 compatibility adapter source changed"
-          p.write_text(src.replace(old, new))
-          PY
-      - name: Adapt agent-core ZIP 9 archive entry name API
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("src-tauri/crates/agent-core/src/specialization/skills/loader/source_dirs.rs")
-          text = p.read_text()
-          old = '        let name = file.name().to_string();'
-          new = chr(10).join([
-              "        let name = file.name()",
-              '            .map_err(|err| format!("Invalid AI Researcher ZIP entry name: {err}"))?',
-              "            .into_owned();",
-          ])
-          assert text.count(old) == 1, "agent-core ZIP API adapter anchor changed"
-          p.write_text(text.replace(old, new))
-          PY
-      - name: Print all checked integration patch sections
-        run: |
-          set -euo pipefail
-          git diff --check
-          echo '---UNIFIED_RUSTSEC_PATCH_BEGIN---'
-          git diff --no-ext-diff -- \
-            src-tauri/Cargo.toml \
-            src-tauri/Cargo.lock \
-            src-tauri/src/infrastructure/spreadsheet_xlsx_tests.rs \
+          git diff --exit-code -- src-tauri/Cargo.toml src-tauri/Cargo.lock \
+            src-tauri/crates/agent-core/src/specialization/skills/loader/source_dirs.rs \
             src-tauri/crates/lsp/src/install_pipeline.rs \
-            src-tauri/crates/agent-core/src/specialization/skills/loader/source_dirs.rs
-          echo '---UNIFIED_RUSTSEC_PATCH_END---'
+            src-tauri/src/infrastructure/spreadsheet_xlsx_tests.rs
       - uses: actions/upload-artifact@v4
         with:
           name: combined-cargo-and-tested-sources

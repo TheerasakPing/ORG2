@@ -1,0 +1,67 @@
+# Read-only pull-request validation for Linux and the full Cargo workspace.
+# This workflow deliberately builds/tests only; it never signs or publishes.
+name: Rust Linux and workspace lock gate
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-linux-lock-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-workspace-lock:
+    name: Rust (whole-workspace Cargo.lock)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Resolve entire workspace with immutable lockfile
+        working-directory: src-tauri
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+  rust-linux:
+    name: Rust (Linux workspace tests)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install Linux Tauri build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Node.js for sidecar staging
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - name: Configure Git identity for disposable fixture repositories
+        run: |
+          git config --global user.name "ORG2 CI Fixture"
+          git config --global user.email "org2-ci@tests.invalid"
+          git config --global commit.gpgsign false
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: "ci-linux-workspace"
+          cache-on-failure: true
+      - name: Build and stage Linux debug sidecar
+        run: node scripts/tauri/prepare-sidecars.cjs --profile debug
+      - name: Run full Linux Rust workspace tests with locked dependencies
+        working-directory: src-tauri
+        run: cargo test --locked --workspace --no-fail-fast

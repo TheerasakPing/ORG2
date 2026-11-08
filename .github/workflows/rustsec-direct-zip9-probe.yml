@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   candidate:
-    name: Resolve direct ZIP 9.4.1 candidate
+    name: Resolve direct ZIP 9.4.2 with LSP API migration
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     steps:
@@ -33,14 +33,32 @@ jobs:
           assert text.count(old) == 1, "direct ZIP manifest anchor changed"
           p.write_text(text.replace(old, 'zip = "9.4.1"            # ZIP compression'))
           PY
-          cargo update -p zip@2.4.2 --precise 9.4.1
+          cargo update -p zip@2.4.2 --precise 9.4.2
           cargo metadata --locked --format-version 1 > /dev/null
+      - name: Adapt LSP ZIP entry name API (Result in ZIP 9)
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src-tauri/crates/lsp/src/install_pipeline.rs")
+          content = p.read_text()
+          before = '        let name = file.name().to_string();'
+          after = (
+              '        let name = file.name()\\n'
+              '            .map_err(|err| InstallError::DownloadFailed(\\n'
+              '                format!("Failed to parse ZIP entry name: {err}")\\n'
+              '            ))?\\n'
+              '            .into_owned();'
+          ).replace('\\n', '\n')
+          assert content.count(before) == 1, "LSP ZIP API adapter anchor changed"
+          p.write_text(content.replace(before, after))
+          PY
       - name: Emit manifest and lock diff for review
         run: |
           set -euo pipefail
           git diff --check
           echo '---ZIP9_PATCH_BEGIN---'
-          git diff --no-ext-diff -- src-tauri/Cargo.toml src-tauri/Cargo.lock
+          git diff --no-ext-diff -- src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/crates/lsp/src/install_pipeline.rs
           echo '---ZIP9_PATCH_END---'
       - uses: actions/upload-artifact@v4
         with:
@@ -48,6 +66,7 @@ jobs:
           path: |
             src-tauri/Cargo.toml
             src-tauri/Cargo.lock
+            src-tauri/crates/lsp/src/install_pipeline.rs
           if-no-files-found: error
           retention-days: 7
 

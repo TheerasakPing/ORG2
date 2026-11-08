@@ -43,13 +43,13 @@ jobs:
           p = Path("src-tauri/crates/lsp/src/install_pipeline.rs")
           content = p.read_text()
           before = '        let name = file.name().to_string();'
-          after = (
-              '        let name = file.name()\\n'
-              '            .map_err(|err| InstallError::DownloadFailed(\\n'
-              '                format!("Failed to parse ZIP entry name: {err}")\\n'
-              '            ))?\\n'
-              '            .into_owned();'
-          ).replace('\\n', '\n')
+          after = chr(10).join([
+              "        let name = file.name()",
+              "            .map_err(|err| InstallError::DownloadFailed(",
+              '                format!("Failed to parse ZIP entry name: {err}")',
+              "            ))?",
+              "            .into_owned();",
+          ])
           assert content.count(before) == 1, "LSP ZIP API adapter anchor changed"
           p.write_text(content.replace(before, after))
           PY

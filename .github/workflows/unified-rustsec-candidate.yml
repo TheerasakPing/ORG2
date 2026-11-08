@@ -1,0 +1,186 @@
+# Disposable integration trial — no Git pushes, signatures, secret reads, or releases.
+# Compare combined dependency graph rather than trusting isolated child PR scans.
+name: Unified RustSec remediation integration candidate
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unified-rustsec-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    name: Resolve and preserve combined Cargo manifest/lock and test sources
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Apply compatible direct manifest changes (no ignored advisories)
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src-tauri/Cargo.toml")
+          source = p.read_text()
+          replacements = [
+              ('zip = "2"                # ZIP compression', 'zip = "9.4.2"            # ZIP compression', 1),
+              ('calamine = "0.35.0"', 'calamine = "0.38.0"', 1),
+              ('rust_xlsxwriter = "0.95.0"', 'rust_xlsxwriter = "0.102.0"', 1),
+              ('tauri-plugin-updater = "=2.9.0"', 'tauri-plugin-updater = { version = "=2.9.0", default-features = false, features = ["rustls-tls"] }', 2),
+          ]
+          for old, new, count in replacements:
+              assert source.count(old) == count, f"Expected {count} manifest anchors for {old!r}"
+              source = source.replace(old, new)
+          p.write_text(source)
+          PY
+      - name: Resolve pinned TLS, compression, workbook and updater dependencies
+        working-directory: src-tauri
+        run: |
+          set -euo pipefail
+          cargo update -p quinn-proto@0.11.17 --precise 0.11.18
+          cargo update -p rustls@0.23.45 --precise 0.23.46
+          cargo update -p rustls-webpki@0.103.15 --precise 0.103.16
+          cargo update -p webpki-roots@1.0.7 --precise 1.0.10
+          cargo update -p webpki-root-certs@1.0.7 --precise 1.0.10
+          cargo update -p libz-sys@1.1.29 --precise 1.1.31
+          cargo update -p calamine@0.35.0 --precise 0.38.0
+          cargo update -p rust_xlsxwriter@0.95.0 --precise 0.102.0
+          cargo update -p zip@2.4.2 --precise 9.4.2
+          cargo update -p tauri-plugin-updater@2.9.0 --precise 2.9.0
+          cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/unified-metadata.json"
+          python3 - <<'PY'
+          import json, os
+          with open(os.environ["RUNNER_TEMP"] + "/unified-metadata.json", encoding="utf-8") as f:
+              ps = json.load(f)["packages"]
+          found = {(p["name"], p["version"]) for p in ps}
+          must = {
+              ("quinn-proto", "0.11.18"),
+              ("rustls", "0.23.46"),
+              ("rustls-webpki", "0.103.16"),
+              ("webpki-roots", "1.0.10"),
+              ("webpki-root-certs", "1.0.10"),
+              ("libz-sys", "1.1.31"),
+              ("calamine", "0.38.0"),
+              ("rust_xlsxwriter", "0.102.0"),
+          }
+          assert not (must - found), f"Missing expected patched package: {must - found}"
+          zips = sorted({p["version"] for p in ps if p["name"] == "zip"})
+          print("Unified ZIP dependency versions:", zips)
+          assert all(v.startswith("9.") for v in zips), "Older ZIP major persists; do not merge"
+          PY
+      - name: Stage tested workbook/LSP test sources and ZIP 9 compatibility adapter
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin \
+            f174a6ec95eeacd7671ecea2c06be61324b98c38 \
+            387556af500ab0a4daac302d6f1f101e654ff42f
+          git show f174a6ec95eeacd7671ecea2c06be61324b98c38:src-tauri/src/infrastructure/spreadsheet_xlsx_tests.rs > src-tauri/src/infrastructure/spreadsheet_xlsx_tests.rs
+          git show 387556af500ab0a4daac302d6f1f101e654ff42f:src-tauri/crates/lsp/src/install_pipeline.rs > src-tauri/crates/lsp/src/install_pipeline.rs
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src-tauri/crates/lsp/src/install_pipeline.rs")
+          src = p.read_text()
+          old = '        let name = file.name().to_string();'
+          new = chr(10).join([
+              "        let name = file.name()",
+              "            .map_err(|err| InstallError::DownloadFailed(",
+              '                format!("Failed to parse ZIP entry name: {err}")',
+              "            ))?",
+              "            .into_owned();",
+          ])
+          assert src.count(old) == 1, "ZIP 9 compatibility adapter source changed"
+          p.write_text(src.replace(old, new))
+          PY
+      - name: Print all checked integration patch sections
+        run: |
+          set -euo pipefail
+          git diff --check
+          echo '---UNIFIED_RUSTSEC_PATCH_BEGIN---'
+          git diff --no-ext-diff -- \
+            src-tauri/Cargo.toml \
+            src-tauri/Cargo.lock \
+            src-tauri/src/infrastructure/spreadsheet_xlsx_tests.rs \
+            src-tauri/crates/lsp/src/install_pipeline.rs
+          echo '---UNIFIED_RUSTSEC_PATCH_END---'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: combined-cargo-and-tested-sources
+          path: |
+            src-tauri/Cargo.toml
+            src-tauri/Cargo.lock
+            src-tauri/src/infrastructure/spreadsheet_xlsx_tests.rs
+            src-tauri/crates/lsp/src/install_pipeline.rs
+          if-no-files-found: error
+          retention-days: 7
+
+  rustsec:
+    name: Unified RustSec audit — zero vulnerabilities required
+    needs: resolve
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: combined-cargo-and-tested-sources
+          path: .
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Full workspace audit (fail closed)
+        working-directory: src-tauri
+        run: cargo audit
+
+  linux-regression:
+    name: Linux workspace E2E + ZIP/XLSX smoke (combined candidate)
+    needs: resolve
+    runs-on: ubuntu-22.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: combined-cargo-and-tested-sources
+          path: .
+      - name: Install Tauri Linux toolchain prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - name: Fixture Git identity for disposable repo tests
+        run: |
+          git config --global user.name "ORG2 CI Fixture"
+          git config --global user.email "org2-ci@tests.invalid"
+          git config --global commit.gpgsign false
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: "ci-unified-rustsec"
+      - name: Build and stage debug sidecar
+        run: node scripts/tauri/prepare-sidecars.cjs --profile debug
+      - name: Native application compile
+        working-directory: src-tauri
+        run: cargo check --locked -p org2
+      - name: XLSX writer roundtrip and corrupt workbook regression
+        working-directory: src-tauri
+        run: cargo test --locked -p org2 --lib spreadsheet_xlsx
+      - name: ZIP 9 extraction confinement/invalid-input tests
+        working-directory: src-tauri
+        run: cargo test --locked -p lsp --lib test_zip_installer
+      - name: Full Linux Rust workspace regression tests
+        working-directory: src-tauri
+        run: cargo test --locked --workspace --no-fail-fast

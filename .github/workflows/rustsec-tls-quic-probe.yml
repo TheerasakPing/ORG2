@@ -1,0 +1,114 @@
+# Diagnostic trial: Cargo regenerates a candidate locked dependency graph.
+# No job may push, sign, or publish. Audit failures MUST NOT be ignored.
+name: RustSec TLS and QUIC patch verification
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rustsec-tls-trial-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-lock-candidate:
+    name: Verified TLS/QUIC Cargo.lock dependency set
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Verify all five patched crate versions on immutable workspace lock
+        working-directory: src-tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/rustsec-metadata.json"
+          python3 - <<'PY'
+          import json, os
+          with open(os.environ["RUNNER_TEMP"] + "/rustsec-metadata.json", encoding="utf-8") as f:
+              packages = json.load(f)["packages"]
+          versions = {(p["name"], p["version"]) for p in packages}
+          targets = {
+              ("quinn-proto", "0.11.18"),
+              ("rustls", "0.23.46"),
+              ("rustls-webpki", "0.103.16"),
+              ("webpki-roots", "1.0.10"),
+              ("webpki-root-certs", "1.0.10"),
+          }
+          missing = targets - versions
+          assert not missing, f"Patched dependencies missing from locked workspace: {missing}"
+          print("Verified five patched Cargo.lock dependency versions.")
+          PY
+      - name: Reject lockfile churn
+        run: git diff --exit-code -- src-tauri/Cargo.lock
+      - name: Preserve candidate locked dependency graph
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustsec-candidate-cargo-lock
+          path: src-tauri/Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
+
+  linux-regression:
+    name: Linux Rust dependency smoke (candidate lockfile)
+    needs: cargo-lock-candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install Cargo-generated candidate lockfile
+        uses: actions/download-artifact@v4
+        with:
+          name: rustsec-candidate-cargo-lock
+          path: src-tauri
+      - name: Install Linux Rust build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: "ci-linux-security-probe"
+          cache-on-failure: true
+      - name: Check Rust crates affected by network/security dependencies
+        working-directory: src-tauri
+        run: cargo check --locked -p integrations -p market-connect -p git
+      - name: Mobile Relay Rust smoke
+        working-directory: src-tauri
+        run: cargo test --locked -p mobile-relay-protocol --all-features
+
+  security-audit:
+    name: RustSec audit (FAIL if vulnerabilities remain)
+    needs: cargo-lock-candidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Install Cargo-generated candidate lockfile
+        uses: actions/download-artifact@v4
+        with:
+          name: rustsec-candidate-cargo-lock
+          path: src-tauri
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit candidate lockfile without exceptions
+        working-directory: src-tauri
+        run: cargo audit

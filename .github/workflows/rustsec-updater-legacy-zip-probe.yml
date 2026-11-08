@@ -1,0 +1,102 @@
+# Read-only experiment: keep Tauri 2.11 / Rust 1.89 and disable the
+# optional Tauri-v1 ZIP updater compatibility feature only. Never publish.
+name: RustSec updater legacy ZIP feature verification
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: updater-legacy-zip-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    name: Verify updater excludes legacy ZIP 4.x
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify committed updater settings and immutable Cargo.lock
+        working-directory: src-tauri
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/updater-metadata.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          value = Path("Cargo.toml").read_text()
+          updater = 'tauri-plugin-updater = { version = "=2.9.0", default-features = false, features = ["rustls-tls"] }'
+          assert value.count(updater) == 2, "Both updater declarations must disable legacy ZIP"
+          with open(os.environ["RUNNER_TEMP"] + "/updater-metadata.json", encoding="utf-8") as f:
+              packages = json.load(f)["packages"]
+          zips = sorted({p["version"] for p in packages if p["name"] == "zip"})
+          print("ZIP versions on committed lockfile:", zips)
+          assert "4.6.1" not in zips, "Legacy ZIP 4.x is still present"
+          PY
+      - name: Reject manifest and lockfile churn
+        run: git diff --exit-code -- src-tauri/Cargo.toml src-tauri/Cargo.lock
+      - uses: actions/upload-artifact@v4
+        with:
+          name: updater-legacy-zip-disabled-candidate
+          path: |
+            src-tauri/Cargo.toml
+            src-tauri/Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
+
+  linux-updater-build:
+    name: Linux compile smoke with v1 ZIP updater disabled
+    needs: resolve
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-legacy-zip-disabled-candidate
+          path: src-tauri
+      - name: Install Linux Tauri build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: "ci-updater-no-v1-zip"
+      - name: Stage sidecar
+        run: node scripts/tauri/prepare-sidecars.cjs --profile debug
+      - name: Compile Tauri application with immutable dependencies
+        working-directory: src-tauri
+        run: cargo check --locked -p org2
+
+  audit:
+    name: RustSec audit without legacy updater ZIP dependency
+    needs: resolve
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-legacy-zip-disabled-candidate
+          path: src-tauri
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Fail on remaining vulnerabilities
+        working-directory: src-tauri
+        run: cargo audit

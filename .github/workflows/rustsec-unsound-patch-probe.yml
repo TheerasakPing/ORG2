@@ -1,0 +1,111 @@
+# Isolated diagnostic for two compatible RustSec informational fixes.
+# Read-only: never push, merge, sign, upload installers, or publish releases.
+name: RustSec unsoundness patch compatibility probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rustsec-unsound-probe-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    name: Resolve audited anyhow and memmap2 patch releases
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Use Cargo resolver for two existing patch-version fixes
+        working-directory: src-tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo update -p anyhow@1.0.102 --precise 1.0.103
+          cargo update -p memmap2@0.9.10 --precise 0.9.11
+          cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/patch-metadata.json"
+          python3 - <<'PY'
+          import json, os
+          with open(os.environ["RUNNER_TEMP"] + "/patch-metadata.json", encoding="utf-8") as f:
+              packages = json.load(f)["packages"]
+          found = {(p["name"], p["version"]) for p in packages}
+          expected = {("anyhow", "1.0.103"), ("memmap2", "0.9.11")}
+          assert not (expected - found), f"Missing patched packages: {expected - found}"
+          print("Verified compatible RustSec patch versions:", sorted(expected))
+          PY
+      - name: Emit exact Cargo-generated patch and validate whitespace
+        run: |
+          set -euo pipefail
+          git diff --check
+          echo '---UNSOUND_PATCH_BEGIN---'
+          git diff --no-ext-diff -- src-tauri/Cargo.lock
+          echo '---UNSOUND_PATCH_END---'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rustsec-unsound-candidate-cargo-lock
+          path: src-tauri/Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
+
+  audit:
+    name: RustSec audit on candidate lock (fail closed)
+    needs: resolve
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: rustsec-unsound-candidate-cargo-lock
+          path: src-tauri
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Run unmodified Cargo Audit with no ignore/waiver flags
+        working-directory: src-tauri
+        run: cargo audit
+
+  linux-smoke:
+    name: Native app compile and search/mmap regression smoke
+    needs: resolve
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: rustsec-unsound-candidate-cargo-lock
+          path: src-tauri
+      - name: Install Linux Tauri prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: "ci-unsound-patch-probe"
+      - name: Stage native debug sidecar
+        run: node scripts/tauri/prepare-sidecars.cjs --profile debug
+      - name: Compile app and mmap/search consumers with immutable lock
+        working-directory: src-tauri
+        run: cargo check --locked -p org2 -p search
+      - name: Search crate Rust regression tests
+        working-directory: src-tauri
+        run: cargo test --locked -p search --lib
+      - name: App native XLSX read/write integration smoke
+        working-directory: src-tauri
+        run: cargo test --locked -p org2 --lib spreadsheet_xlsx
